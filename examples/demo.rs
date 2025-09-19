@@ -57,9 +57,9 @@ enum Status {
 
 #[derive(Facet)]
 #[repr(u8)]
-enum Message {
+enum EnumWithData {
     #[facet(capnp:id=0)]
-    Text(String),
+    MyText(String),
     #[facet(capnp:id=1)]
     Image { url: String, caption: String },
     #[facet(capnp:id=2)]
@@ -87,7 +87,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Generate complete schema for Message enum (complex enum with data variants)
     println!("Message complete schema:");
-    let message_schema = code_first_capnp::capnp_schema_for::<Message>()?;
+    let message_schema = code_first_capnp::capnp_schema_for::<EnumWithData>()?;
     println!("{}", message_schema);
 
     // Generate schema for empty struct
