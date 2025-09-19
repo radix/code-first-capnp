@@ -1,0 +1,7 @@
+[package]
+name = "code-first-capnp"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+facet = "0.29"
