@@ -72,35 +72,35 @@ struct EmptyStruct;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== Code-First Cap'n Proto Schema Generation ===\n");
 
-    // Generate schema for Person
-    println!("Person schema:");
-    let person_schema = code_first_capnp::capnp_struct_for::<Person>()?;
+    // Demonstrate the new unified schema generation function
+    println!("=== Using Unified Schema Generation ===\n");
+
+    // Generate complete schema for Person struct
+    println!("Person complete schema:");
+    let person_schema = code_first_capnp::capnp_schema_for::<Person>()?;
     println!("{}", person_schema);
 
-    // Generate schema for Company
-    println!("Company schema:");
-    let company_schema = code_first_capnp::capnp_struct_for::<Company>()?;
-    println!("{}", company_schema);
+    // Generate complete schema for Status enum (simple enum with only unit variants)
+    println!("Status complete schema:");
+    let status_schema = code_first_capnp::capnp_schema_for::<Status>()?;
+    println!("{}", status_schema);
 
-    // Generate union for Status enum
-    println!("Status union:");
-    let status_union = code_first_capnp::capnp_union_for::<Status>()?;
-    println!("{}", status_union);
-
-    // Generate union for Message enum with associated data
-    println!("Message union:");
-    let message_union = code_first_capnp::capnp_union_for::<Message>()?;
-    println!("{}", message_union);
-
-    // Generate helper structs for Message enum variants
-    println!("Message variant structs:");
-    let message_structs = code_first_capnp::capnp_enum_variant_structs_for::<Message>()?;
-    println!("{}", message_structs);
+    // Generate complete schema for Message enum (complex enum with data variants)
+    println!("Message complete schema:");
+    let message_schema = code_first_capnp::capnp_schema_for::<Message>()?;
+    println!("{}", message_schema);
 
     // Generate schema for empty struct
-    println!("EmptyStruct schema:");
-    let empty_schema = code_first_capnp::capnp_struct_for::<EmptyStruct>()?;
+    println!("EmptyStruct complete schema:");
+    let empty_schema = code_first_capnp::capnp_schema_for::<EmptyStruct>()?;
     println!("{}", empty_schema);
+
+    println!("\n=== Individual Function Examples (Legacy) ===\n");
+
+    // Generate schema for Company using individual function
+    println!("Company schema (individual function):");
+    let company_schema = code_first_capnp::capnp_struct_for::<Company>()?;
+    println!("{}", company_schema);
 
     Ok(())
 }

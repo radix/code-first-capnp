@@ -62,6 +62,40 @@ pub fn capnp_struct_for<T: Facet<'static>>() -> Result<String, String> {
     Ok(out)
 }
 
+/// Generates a complete Cap'n Proto schema for any type.
+/// For structs, produces the struct definition.
+/// For enums, produces both the union struct and all variant helper structs.
+pub fn capnp_schema_for<T: Facet<'static>>() -> Result<String, String> {
+    let shape = T::SHAPE;
+
+    match shape.ty {
+        Type::User(UserType::Struct(_)) => {
+            // For structs, just generate the struct definition
+            capnp_struct_for::<T>()
+        }
+        Type::User(UserType::Enum(_)) => {
+            // For enums, generate both the union and the variant structs
+            let mut result = String::new();
+            
+            // First generate the main union struct
+            let union_schema = capnp_union_for::<T>()?;
+            result.push_str(&union_schema);
+            result.push('\n');
+            
+            // Then generate the variant helper structs
+            let variant_structs = capnp_enum_variant_structs_for::<T>()?;
+            if !variant_structs.is_empty() {
+                result.push_str(&variant_structs);
+            }
+            
+            Ok(result)
+        }
+        _ => {
+            Err(format!("{} is not a supported type (must be struct or enum)", shape.type_identifier))
+        }
+    }
+}
+
 /// Generate a Cap'n Proto union for a Rust enum
 pub fn capnp_union_for<T: Facet<'static>>() -> Result<String, String> {
     let shape = T::SHAPE;
@@ -465,5 +499,59 @@ mod tests {
         let error_msg = result.unwrap_err();
         assert!(error_msg.contains("Variant 'MissingId' missing required capnp:id attribute"));
         assert!(error_msg.contains("#[facet(capnp:id=N)]"));
+    }
+
+    #[test]
+    fn test_unified_struct_schema_generation() {
+        let result = capnp_schema_for::<TestStruct>().unwrap();
+        println!("{}", result);
+
+        // Should contain struct definition
+        assert!(result.contains("struct TestStruct {"));
+        assert!(result.contains("id @0 :UInt64;"));
+        assert!(result.contains("fullName @1 :Text;"));
+        assert!(result.contains("numbers @2 :List(Int32);"));
+        assert!(result.contains("active @3 :Bool;"));
+    }
+
+    #[test]
+    fn test_unified_enum_schema_generation() {
+        let result = capnp_schema_for::<ComplexEnum>().unwrap();
+        println!("{}", result);
+
+        // Should contain the main union struct
+        assert!(result.contains("struct ComplexEnum {"));
+        assert!(result.contains("union {"));
+        assert!(result.contains("Unit @0 :Void;"));
+        assert!(result.contains("Tuple @1 :ComplexEnum_Tuple;"));
+        assert!(result.contains("Struct @2 :ComplexEnum_Struct;"));
+
+        // Should also contain variant helper structs
+        assert!(result.contains("struct ComplexEnum_Tuple {"));
+        assert!(result.contains("field0 @0 :UInt32;"));
+        assert!(result.contains("field1 @1 :Text;"));
+        
+        assert!(result.contains("struct ComplexEnum_Struct {"));
+        assert!(result.contains("id @0 :UInt64;"));
+        assert!(result.contains("name @1 :Text;"));
+
+        // Should not generate struct for Unit variant
+        assert!(!result.contains("ComplexEnum_Unit"));
+    }
+
+    #[test]
+    fn test_unified_simple_enum_schema_generation() {
+        let result = capnp_schema_for::<Status>().unwrap();
+        println!("{}", result);
+
+        // Should contain the union definition
+        assert!(result.contains("struct Status {"));
+        assert!(result.contains("union {"));
+        assert!(result.contains("Active @0 :Void;"));
+        assert!(result.contains("Inactive @1 :Void;"));
+        assert!(result.contains("Pending @2 :Void;"));
+
+        // Should not have any variant structs since all variants are unit variants
+        assert!(!result.contains("struct Status_"));
     }
 }
