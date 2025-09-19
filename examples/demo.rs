@@ -59,11 +59,16 @@ enum Status {
 #[repr(u8)]
 enum EnumWithData {
     #[facet(capnp:id=0)]
-    MyText(String),
-    #[facet(capnp:id=1)]
-    Image { url: String, caption: String },
+    MyText(#[facet(capnp:id=1)] String),
     #[facet(capnp:id=2)]
-    Video(String, u32), // url, duration_seconds
+    Image {
+        #[facet(capnp:id=3)]
+        url: String,
+        #[facet(capnp:id=4)]
+        caption: String,
+    },
+    #[facet(capnp:id=5)]
+    Video(#[facet(capnp:id=6)] String, #[facet(capnp:id=7)] u32), // url, duration_seconds
 }
 
 #[derive(Facet)]

@@ -344,10 +344,24 @@ pub fn build_capnp_union_from_shape<T: Facet<'static>>() -> Result<CapnpStruct, 
                     ));
                 } else {
                     let mut group_fields = Vec::new();
-                    for (field_idx, field) in variant.data.fields.iter().enumerate() {
-                        let field_name = format!("field{}", field_idx);
+                    for field in variant.data.fields.iter() {
+                        let (name_override, id_override) = capnp_overrides_from_attrs(field);
+
+                        let field_id = match id_override {
+                            Some(id) => id,
+                            None => {
+                                return Err(format!(
+                                    "Field in variant '{}' missing required capnp:id attribute. Use #[facet(capnp:id=N)]",
+                                    variant_name
+                                ));
+                            }
+                        };
+
+                        let field_name =
+                            name_override.unwrap_or_else(|| format!("field{}", field_id));
+
                         let capnp_ty = shape_to_capnp_type(field.shape)?;
-                        group_fields.push(CapnpField::new(field_name, field_idx as u32, capnp_ty));
+                        group_fields.push(CapnpField::new(field_name, field_id, capnp_ty));
                     }
                     union.add_variant(CapnpUnionVariant::new_group(
                         variant_name.to_string(),
@@ -366,10 +380,24 @@ pub fn build_capnp_union_from_shape<T: Facet<'static>>() -> Result<CapnpStruct, 
                     ));
                 } else {
                     let mut group_fields = Vec::new();
-                    for (field_idx, field) in variant.data.fields.iter().enumerate() {
-                        let field_name = format!("field{}", field_idx);
+                    for field in variant.data.fields.iter() {
+                        let (name_override, id_override) = capnp_overrides_from_attrs(field);
+
+                        let field_id = match id_override {
+                            Some(id) => id,
+                            None => {
+                                return Err(format!(
+                                    "Field in variant '{}' missing required capnp:id attribute. Use #[facet(capnp:id=N)]",
+                                    variant_name
+                                ));
+                            }
+                        };
+
+                        let field_name =
+                            name_override.unwrap_or_else(|| format!("field{}", field_id));
+
                         let capnp_ty = shape_to_capnp_type(field.shape)?;
-                        group_fields.push(CapnpField::new(field_name, field_idx as u32, capnp_ty));
+                        group_fields.push(CapnpField::new(field_name, field_id, capnp_ty));
                     }
                     union.add_variant(CapnpUnionVariant::new_group(
                         variant_name.to_string(),
@@ -381,10 +409,23 @@ pub fn build_capnp_union_from_shape<T: Facet<'static>>() -> Result<CapnpStruct, 
             StructKind::Struct => {
                 // Named struct variants become groups with named fields
                 let mut group_fields = Vec::new();
-                for (field_idx, field) in variant.data.fields.iter().enumerate() {
-                    let field_name = field.name.to_string();
+                for field in variant.data.fields.iter() {
+                    let (name_override, id_override) = capnp_overrides_from_attrs(field);
+
+                    let field_id = match id_override {
+                        Some(id) => id,
+                        None => {
+                            return Err(format!(
+                                "Field '{}' in variant '{}' missing required capnp:id attribute. Use #[facet(capnp:id=N)]",
+                                field.name, variant_name
+                            ));
+                        }
+                    };
+
+                    let field_name = name_override.unwrap_or_else(|| field.name.to_string());
+
                     let capnp_ty = shape_to_capnp_type(field.shape)?;
-                    group_fields.push(CapnpField::new(field_name, field_idx as u32, capnp_ty));
+                    group_fields.push(CapnpField::new(field_name, field_id, capnp_ty));
                 }
                 union.add_variant(CapnpUnionVariant::new_group(
                     variant_name.to_string(),
@@ -522,9 +563,14 @@ mod tests {
         #[facet(capnp:id=0)]
         Unit,
         #[facet(capnp:id=1)]
-        Tuple(u32, String),
+        Tuple(#[facet(capnp:id=10)] u32, #[facet(capnp:id=11)] String),
         #[facet(capnp:id=2)]
-        Struct { id: u64, name: String },
+        Struct {
+            #[facet(capnp:id=20)]
+            id: u64,
+            #[facet(capnp:id=21)]
+            name: String,
+        },
     }
 
     #[test]
@@ -588,11 +634,11 @@ mod tests {
         assert_eq!(tuple_variant.id, 1);
         if let CapnpVariantType::Group(fields) = &tuple_variant.variant_type {
             assert_eq!(fields.len(), 2);
-            assert_eq!(fields[0].name, "field0");
-            assert_eq!(fields[0].id, 0);
+            assert_eq!(fields[0].name, "field10");
+            assert_eq!(fields[0].id, 10);
             assert_eq!(fields[0].field_type, CapnpType::UInt32);
-            assert_eq!(fields[1].name, "field1");
-            assert_eq!(fields[1].id, 1);
+            assert_eq!(fields[1].name, "field11");
+            assert_eq!(fields[1].id, 11);
             assert_eq!(fields[1].field_type, CapnpType::Text);
         } else {
             panic!("Expected Group variant type");
@@ -604,10 +650,10 @@ mod tests {
         if let CapnpVariantType::Group(fields) = &struct_variant.variant_type {
             assert_eq!(fields.len(), 2);
             assert_eq!(fields[0].name, "id");
-            assert_eq!(fields[0].id, 0);
+            assert_eq!(fields[0].id, 20);
             assert_eq!(fields[0].field_type, CapnpType::UInt64);
             assert_eq!(fields[1].name, "name");
-            assert_eq!(fields[1].id, 1);
+            assert_eq!(fields[1].id, 21);
             assert_eq!(fields[1].field_type, CapnpType::Text);
         } else {
             panic!("Expected Group variant type");
@@ -671,8 +717,10 @@ mod tests {
         assert_eq!(tuple_variant.name, "Tuple");
         if let CapnpVariantType::Group(fields) = &tuple_variant.variant_type {
             assert_eq!(fields.len(), 2);
-            assert_eq!(fields[0].name, "field0");
-            assert_eq!(fields[1].name, "field1");
+            assert_eq!(fields[0].name, "field10");
+            assert_eq!(fields[0].id, 10);
+            assert_eq!(fields[1].name, "field11");
+            assert_eq!(fields[1].id, 11);
         } else {
             panic!("Expected Group variant type for Tuple");
         }
@@ -682,7 +730,9 @@ mod tests {
         if let CapnpVariantType::Group(fields) = &struct_variant.variant_type {
             assert_eq!(fields.len(), 2);
             assert_eq!(fields[0].name, "id");
+            assert_eq!(fields[0].id, 20);
             assert_eq!(fields[1].name, "name");
+            assert_eq!(fields[1].id, 21);
         } else {
             panic!("Expected Group variant type for Struct");
         }
@@ -737,5 +787,79 @@ mod tests {
         assert!(field_types.contains(&&CapnpType::Text));
         assert!(field_types.contains(&&CapnpType::Bool));
         assert!(field_types.contains(&&CapnpType::List(Box::new(CapnpType::Int32))));
+    }
+
+    // Test enum with explicit field IDs like in demo
+    #[derive(Facet)]
+    #[repr(u8)]
+    enum EnumWithData {
+        #[facet(capnp:id=0)]
+        MyText(#[facet(capnp:id=1)] String),
+        #[facet(capnp:id=2)]
+        Image {
+            #[facet(capnp:id=3)]
+            url: String,
+            #[facet(capnp:id=4)]
+            caption: String,
+        },
+        #[facet(capnp:id=5)]
+        Video(#[facet(capnp:id=6)] String, #[facet(capnp:id=7)] u32),
+    }
+
+    #[test]
+    fn test_enum_with_explicit_field_ids() {
+        let union_struct = build_capnp_union_from_shape::<EnumWithData>().unwrap();
+
+        assert_eq!(union_struct.name, "EnumWithData");
+        assert!(union_struct.fields.is_empty());
+        assert!(union_struct.union.is_some());
+
+        let union = union_struct.union.unwrap();
+        assert_eq!(union.variants.len(), 3);
+
+        // Check MyText variant with explicit field ID
+        let text_variant = &union.variants[0];
+        assert_eq!(text_variant.name, "MyText");
+        assert_eq!(text_variant.id, 0);
+        if let CapnpVariantType::Group(fields) = &text_variant.variant_type {
+            assert_eq!(fields.len(), 1);
+            assert_eq!(fields[0].name, "field1");
+            assert_eq!(fields[0].id, 1); // Explicit ID from annotation
+            assert_eq!(fields[0].field_type, CapnpType::Text);
+        } else {
+            panic!("Expected Group variant type");
+        }
+
+        // Check Image variant with named fields and explicit IDs
+        let image_variant = &union.variants[1];
+        assert_eq!(image_variant.name, "Image");
+        assert_eq!(image_variant.id, 2);
+        if let CapnpVariantType::Group(fields) = &image_variant.variant_type {
+            assert_eq!(fields.len(), 2);
+            assert_eq!(fields[0].name, "url");
+            assert_eq!(fields[0].id, 3); // Explicit ID from annotation
+            assert_eq!(fields[0].field_type, CapnpType::Text);
+            assert_eq!(fields[1].name, "caption");
+            assert_eq!(fields[1].id, 4); // Explicit ID from annotation
+            assert_eq!(fields[1].field_type, CapnpType::Text);
+        } else {
+            panic!("Expected Group variant type");
+        }
+
+        // Check Video variant with explicit field IDs
+        let video_variant = &union.variants[2];
+        assert_eq!(video_variant.name, "Video");
+        assert_eq!(video_variant.id, 5);
+        if let CapnpVariantType::Group(fields) = &video_variant.variant_type {
+            assert_eq!(fields.len(), 2);
+            assert_eq!(fields[0].name, "field6");
+            assert_eq!(fields[0].id, 6); // Explicit ID from annotation
+            assert_eq!(fields[0].field_type, CapnpType::Text);
+            assert_eq!(fields[1].name, "field7");
+            assert_eq!(fields[1].id, 7); // Explicit ID from annotation
+            assert_eq!(fields[1].field_type, CapnpType::UInt32);
+        } else {
+            panic!("Expected Group variant type");
+        }
     }
 }
