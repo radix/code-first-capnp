@@ -7,9 +7,8 @@ use facet::{
 };
 
 /// Convention:
-/// - Put `#[facet(capnp:id=<N>)]` on fields to force a field number
-/// - Optionally `#[facet(capnp:name=<foo>)]` to rename in the .capnp
-/// - Absent an id, we assign ordinals 0.. in declaration order (Cap'n Proto-style)
+/// - Put `#[facet(capnp:id=<N>)]` on fields to specify field number (required)
+/// - Optionally `#[facet(name=<foo>)]` to rename in the .capnp
 pub fn capnp_struct_for<T: Facet<'static>>() -> Result<String, String> {
     let shape = T::SHAPE;
 
@@ -24,19 +23,7 @@ pub fn capnp_struct_for<T: Facet<'static>>() -> Result<String, String> {
     }
 
     // Build a list of (capnp_field_id, capnp_field_name, capnp_type_token)
-    // If an id isn't provided by attributes, we assign sequentially starting at 0.
     let mut fields_out = Vec::<(u32, String, String)>::new();
-
-    // First pass: collect all manually assigned IDs to avoid conflicts
-    let mut used_ids = std::collections::HashSet::new();
-    for fld in st.fields.iter() {
-        let (_, id_override) = capnp_overrides_from_attrs(fld);
-        if let Some(id) = id_override {
-            used_ids.insert(id);
-        }
-    }
-
-    let mut next_auto_id: u32 = 0;
 
     for fld in st.fields.iter() {
         let (name_override, id_override) = capnp_overrides_from_attrs(fld);
@@ -44,18 +31,14 @@ pub fn capnp_struct_for<T: Facet<'static>>() -> Result<String, String> {
         // choose the Cap'n Proto field name
         let capnp_name = name_override.unwrap_or_else(|| fld.name.to_string());
 
-        // choose/assign the field id
+        // Field ID is required
         let id = match id_override {
             Some(n) => n,
             None => {
-                // Find the next available ID that isn't already used
-                while used_ids.contains(&next_auto_id) {
-                    next_auto_id += 1;
-                }
-                let n = next_auto_id;
-                used_ids.insert(n);
-                next_auto_id += 1;
-                n
+                return Err(format!(
+                    "Field '{}' missing required capnp:id attribute. Use #[facet(capnp:id=N)]", 
+                    fld.name
+                ));
             }
         };
 
@@ -212,7 +195,7 @@ mod tests {
         name: String,
         #[facet(capnp:id=2)]
         numbers: Vec<i32>,
-        // No capnp attr - should auto-assign id=3
+        #[facet(capnp:id=3)]
         active: bool,
     }
 
@@ -237,5 +220,22 @@ mod tests {
         let result = capnp_struct_for::<EmptyStruct>().unwrap();
         println!("{}", result);
         assert!(result.contains("struct EmptyStruct {}"));
+    }
+
+    #[derive(Facet)]
+    struct MissingIdStruct {
+        #[facet(capnp:id=0)]
+        id: u64,
+        // This field is missing the required capnp:id attribute
+        name: String,
+    }
+
+    #[test]
+    fn test_missing_id_error() {
+        let result = capnp_struct_for::<MissingIdStruct>();
+        assert!(result.is_err());
+        let error_msg = result.unwrap_err();
+        assert!(error_msg.contains("Field 'name' missing required capnp:id attribute"));
+        assert!(error_msg.contains("#[facet(capnp:id=N)]"));
     }
 }

@@ -14,13 +14,13 @@ struct Person {
     #[facet(capnp:id=3)]
     age: u16,
     
-    // No capnp attribute - will auto-assign the next available ID (4)
+    #[facet(capnp:id=4)]
     is_active: bool,
     
     #[facet(capnp:id=10)]
     score: f64,
     
-    // This will get auto-assigned ID 5 (skipping the manually assigned 10)
+    #[facet(capnp:id=5)]
     tags: Vec<String>,
 }
 
@@ -35,7 +35,8 @@ struct Company {
     #[facet(capnp:id=2)]
     founded_year: u32,
     
-    is_public: bool, // auto-assigned ID 3
+    #[facet(capnp:id=3)]
+    is_public: bool,
 }
 
 #[derive(Facet)]
