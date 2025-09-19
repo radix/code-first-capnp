@@ -77,8 +77,8 @@
 //!     }
 //! }
 //!
-//! // Render to string
-//! let schema_text = document.render();
+//! // Render to string (with validation)
+//! let schema_text = document.render().unwrap();
 //! ```
 //!
 //! ## Conventions
@@ -99,7 +99,7 @@ pub use capnp_model::*;
 pub fn capnp_struct_for<T: Facet<'static>>() -> Result<String, String> {
     let capnp_struct = build_capnp_struct_from_shape::<T>()?;
     let document = CapnpDocument::with_struct(capnp_struct);
-    Ok(document.render())
+    document.render().map_err(|e| e.to_string())
 }
 
 /// Generates a complete Cap'n Proto schema for any type.
@@ -107,14 +107,14 @@ pub fn capnp_struct_for<T: Facet<'static>>() -> Result<String, String> {
 /// For enums, produces both the union struct and all variant helper structs.
 pub fn capnp_schema_for<T: Facet<'static>>() -> Result<String, String> {
     let document = build_capnp_document_from_shape::<T>()?;
-    Ok(document.render())
+    document.render().map_err(|e| e.to_string())
 }
 
 /// Generate a Cap'n Proto union for a Rust enum
 pub fn capnp_union_for<T: Facet<'static>>() -> Result<String, String> {
     let capnp_struct = build_capnp_union_from_shape::<T>()?;
     let document = CapnpDocument::with_struct(capnp_struct);
-    Ok(document.render())
+    document.render().map_err(|e| e.to_string())
 }
 
 fn extract_capnp_id_from_variant_attrs(variant: &facet::Variant) -> Option<u32> {
@@ -546,6 +546,7 @@ mod tests {
         assert!(error_msg.contains("#[facet(capnp:id=N)]"));
     }
 
+    #[allow(dead_code)]
     #[derive(Facet)]
     #[repr(u8)]
     enum Status {
@@ -557,6 +558,7 @@ mod tests {
         Pending,
     }
 
+    #[allow(dead_code)]
     #[derive(Facet)]
     #[repr(u8)]
     enum ComplexEnum {
@@ -660,6 +662,7 @@ mod tests {
         }
     }
 
+    #[allow(dead_code)]
     #[derive(Facet)]
     #[repr(u8)]
     enum MissingIdEnum {
@@ -790,6 +793,7 @@ mod tests {
     }
 
     // Test enum with explicit field IDs like in demo
+    #[allow(dead_code)]
     #[derive(Facet)]
     #[repr(u8)]
     enum EnumWithData {

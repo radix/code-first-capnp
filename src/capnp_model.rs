@@ -5,6 +5,24 @@
 
 use std::fmt::Write;
 
+/// Error type for Cap'n Proto model validation
+#[derive(Debug, Clone, PartialEq)]
+pub enum ValidationError {
+    DuplicateId { id: u32, locations: Vec<String> },
+}
+
+impl std::fmt::Display for ValidationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ValidationError::DuplicateId { id, locations } => {
+                write!(f, "Duplicate ID {} found in: {}", id, locations.join(", "))
+            }
+        }
+    }
+}
+
+impl std::error::Error for ValidationError {}
+
 /// Represents a complete Cap'n Proto schema document
 #[derive(Debug, Clone, PartialEq)]
 pub struct CapnpDocument {
@@ -97,24 +115,38 @@ impl CapnpDocument {
         }
     }
 
+    /// Validates all structs in the document for ID conflicts
+    pub fn validate(&self) -> Result<(), ValidationError> {
+        for item in &self.items {
+            match item {
+                CapnpItem::Struct(s) => s.validate()?,
+            }
+        }
+        Ok(())
+    }
+
     /// Renders the document as Cap'n Proto schema text
-    pub fn render(&self) -> String {
+    /// Automatically validates all structs before rendering
+    pub fn render(&self) -> Result<String, ValidationError> {
+        // Validate before rendering
+        self.validate()?;
+
         let mut output = String::new();
 
         for (i, item) in self.items.iter().enumerate() {
             if i > 0 {
                 writeln!(&mut output).unwrap();
             }
-            write!(&mut output, "{}", item.render()).unwrap();
+            write!(&mut output, "{}", item.render()?).unwrap();
         }
 
-        output
+        Ok(output)
     }
 }
 
 impl CapnpItem {
     /// Renders the item as Cap'n Proto schema text
-    pub fn render(&self) -> String {
+    pub fn render(&self) -> Result<String, ValidationError> {
         match self {
             CapnpItem::Struct(s) => s.render(),
         }
@@ -141,8 +173,51 @@ impl CapnpStruct {
         self.union = Some(union);
     }
 
+    /// Validates that all IDs in the struct are unique
+    /// This includes regular field IDs, union variant IDs, and union group field IDs
+    pub fn validate(&self) -> Result<(), ValidationError> {
+        let mut id_locations: std::collections::HashMap<u32, Vec<String>> =
+            std::collections::HashMap::new();
+
+        // Collect regular field IDs
+        for field in &self.fields {
+            let location = format!("struct field '{}'", field.name);
+            id_locations.entry(field.id).or_default().push(location);
+        }
+
+        // Collect union variant and group field IDs if union exists
+        if let Some(union) = &self.union {
+            for variant in &union.variants {
+                let location = format!("union variant '{}'", variant.name);
+                id_locations.entry(variant.id).or_default().push(location);
+
+                // If this variant is a group, collect its field IDs too
+                if let CapnpVariantType::Group(fields) = &variant.variant_type {
+                    for field in fields {
+                        let location =
+                            format!("union group '{}' field '{}'", variant.name, field.name);
+                        id_locations.entry(field.id).or_default().push(location);
+                    }
+                }
+            }
+        }
+
+        // Check for duplicates
+        for (id, locations) in id_locations {
+            if locations.len() > 1 {
+                return Err(ValidationError::DuplicateId { id, locations });
+            }
+        }
+
+        Ok(())
+    }
+
     /// Renders the struct as Cap'n Proto schema text
-    pub fn render(&self) -> String {
+    /// Automatically validates the struct before rendering
+    pub fn render(&self) -> Result<String, ValidationError> {
+        // Validate before rendering
+        self.validate()?;
+
         let mut output = String::new();
 
         writeln!(&mut output, "struct {} {{", self.name).unwrap();
@@ -159,7 +234,7 @@ impl CapnpStruct {
 
         writeln!(&mut output, "}}").unwrap();
 
-        output
+        Ok(output)
     }
 }
 
@@ -292,7 +367,7 @@ mod tests {
     fn test_empty_document() {
         let doc = CapnpDocument::new();
         assert_eq!(doc.items.len(), 0);
-        assert_eq!(doc.render(), "");
+        assert_eq!(doc.render().unwrap(), "");
     }
 
     #[test]
@@ -329,7 +404,7 @@ mod tests {
         doc.add_item(CapnpItem::Struct(s1));
         doc.add_item(CapnpItem::Struct(s2));
 
-        let output = doc.render();
+        let output = doc.render().unwrap();
 
         assert!(output.contains("struct Person {"));
         assert!(output.contains("struct Company {"));
@@ -341,7 +416,7 @@ mod tests {
     #[test]
     fn test_empty_struct() {
         let s = CapnpStruct::new("Empty".to_string());
-        let output = s.render();
+        let output = s.render().unwrap();
 
         assert_eq!(output, "struct Empty {\n}\n");
     }
@@ -388,7 +463,7 @@ mod tests {
         ));
         s.set_union(union);
 
-        let output = s.render();
+        let output = s.render().unwrap();
 
         assert!(output.contains("id @0 :UInt64;"));
         assert!(output.contains("union {"));
@@ -541,7 +616,7 @@ mod tests {
         s.add_field(CapnpField::new("name".to_string(), 1, CapnpType::Text));
 
         let doc = CapnpDocument::with_struct(s);
-        let output = doc.render();
+        let output = doc.render().unwrap();
 
         assert!(output.contains("struct Person {"));
         assert!(output.contains("id @0 :UInt64;"));
@@ -568,7 +643,7 @@ mod tests {
         s.set_union(union);
 
         let doc = CapnpDocument::with_struct(s);
-        let output = doc.render();
+        let output = doc.render().unwrap();
 
         assert!(output.contains("struct Message {"));
         assert!(output.contains("union {"));
@@ -590,39 +665,39 @@ mod tests {
         ));
 
         let tuple_fields = vec![
-            CapnpField::new("field0".to_string(), 0, CapnpType::UInt32),
-            CapnpField::new("field1".to_string(), 1, CapnpType::Text),
+            CapnpField::new("field0".to_string(), 1, CapnpType::UInt32),
+            CapnpField::new("field1".to_string(), 2, CapnpType::Text),
         ];
         union.add_variant(CapnpUnionVariant::new_group(
             "tuple".to_string(),
-            1,
+            3,
             tuple_fields,
         ));
 
         let struct_fields = vec![
-            CapnpField::new("id".to_string(), 0, CapnpType::UInt64),
-            CapnpField::new("name".to_string(), 1, CapnpType::Text),
+            CapnpField::new("id".to_string(), 4, CapnpType::UInt64),
+            CapnpField::new("name".to_string(), 5, CapnpType::Text),
         ];
         union.add_variant(CapnpUnionVariant::new_group(
             "struct".to_string(),
-            2,
+            6,
             struct_fields,
         ));
 
         s.set_union(union);
 
         let doc = CapnpDocument::with_struct(s);
-        let output = doc.render();
+        let output = doc.render().unwrap();
 
         assert!(output.contains("struct ComplexMessage {"));
         assert!(output.contains("union {"));
         assert!(output.contains("unit @0 :Void;"));
-        assert!(output.contains("tuple :group @1 {"));
-        assert!(output.contains("field0 @0 :UInt32;"));
-        assert!(output.contains("field1 @1 :Text;"));
-        assert!(output.contains("struct :group @2 {"));
-        assert!(output.contains("id @0 :UInt64;"));
-        assert!(output.contains("name @1 :Text;"));
+        assert!(output.contains("tuple :group @3 {"));
+        assert!(output.contains("field0 @1 :UInt32;"));
+        assert!(output.contains("field1 @2 :Text;"));
+        assert!(output.contains("struct :group @6 {"));
+        assert!(output.contains("id @4 :UInt64;"));
+        assert!(output.contains("name @5 :Text;"));
     }
 
     #[test]
@@ -663,7 +738,7 @@ mod tests {
         ));
         s.set_union(union);
 
-        let output = s.render();
+        let output = s.render().unwrap();
 
         // Check all field types are rendered correctly
         assert!(output.contains("boolField @0 :Bool;"));
@@ -676,5 +751,266 @@ mod tests {
         // Check union variants
         assert!(output.contains("voidVariant @6 :Void;"));
         assert!(output.contains("textVariant @7 :Text;"));
+    }
+
+    // Validation tests
+    #[test]
+    fn test_valid_struct_with_unique_ids() {
+        let mut s = CapnpStruct::new("ValidStruct".to_string());
+        s.add_field(CapnpField::new("field1".to_string(), 0, CapnpType::UInt32));
+        s.add_field(CapnpField::new("field2".to_string(), 1, CapnpType::Text));
+
+        let mut union = CapnpUnion::new();
+        union.add_variant(CapnpUnionVariant::new(
+            "variant1".to_string(),
+            2,
+            CapnpType::Void,
+        ));
+
+        let group_fields = vec![
+            CapnpField::new("groupField1".to_string(), 3, CapnpType::UInt64),
+            CapnpField::new("groupField2".to_string(), 4, CapnpType::Text),
+        ];
+        union.add_variant(CapnpUnionVariant::new_group(
+            "group1".to_string(),
+            5,
+            group_fields,
+        ));
+        s.set_union(union);
+
+        assert!(s.validate().is_ok());
+    }
+
+    #[test]
+    fn test_duplicate_field_ids_in_struct() {
+        let mut s = CapnpStruct::new("InvalidStruct".to_string());
+        s.add_field(CapnpField::new("field1".to_string(), 0, CapnpType::UInt32));
+        s.add_field(CapnpField::new("field2".to_string(), 0, CapnpType::Text)); // Duplicate ID
+
+        let result = s.validate();
+        assert!(result.is_err());
+
+        if let Err(ValidationError::DuplicateId { id, locations }) = result {
+            assert_eq!(id, 0);
+            assert_eq!(locations.len(), 2);
+            assert!(locations.contains(&"struct field 'field1'".to_string()));
+            assert!(locations.contains(&"struct field 'field2'".to_string()));
+        } else {
+            panic!("Expected DuplicateId error");
+        }
+    }
+
+    #[test]
+    fn test_duplicate_struct_field_and_union_variant_id() {
+        let mut s = CapnpStruct::new("InvalidStruct".to_string());
+        s.add_field(CapnpField::new("field1".to_string(), 0, CapnpType::UInt32));
+
+        let mut union = CapnpUnion::new();
+        union.add_variant(CapnpUnionVariant::new(
+            "variant1".to_string(),
+            0,
+            CapnpType::Void,
+        )); // Duplicate ID
+        s.set_union(union);
+
+        let result = s.validate();
+        assert!(result.is_err());
+
+        if let Err(ValidationError::DuplicateId { id, locations }) = result {
+            assert_eq!(id, 0);
+            assert_eq!(locations.len(), 2);
+            assert!(locations.contains(&"struct field 'field1'".to_string()));
+            assert!(locations.contains(&"union variant 'variant1'".to_string()));
+        } else {
+            panic!("Expected DuplicateId error");
+        }
+    }
+
+    #[test]
+    fn test_duplicate_group_field_ids() {
+        let mut s = CapnpStruct::new("InvalidStruct".to_string());
+
+        let mut union = CapnpUnion::new();
+
+        let group_fields = vec![
+            CapnpField::new("groupField1".to_string(), 0, CapnpType::UInt64),
+            CapnpField::new("groupField2".to_string(), 0, CapnpType::Text), // Duplicate ID within group
+        ];
+        union.add_variant(CapnpUnionVariant::new_group(
+            "group1".to_string(),
+            1,
+            group_fields,
+        ));
+        s.set_union(union);
+
+        let result = s.validate();
+        assert!(result.is_err());
+
+        if let Err(ValidationError::DuplicateId { id, locations }) = result {
+            assert_eq!(id, 0);
+            assert_eq!(locations.len(), 2);
+            assert!(locations.contains(&"union group 'group1' field 'groupField1'".to_string()));
+            assert!(locations.contains(&"union group 'group1' field 'groupField2'".to_string()));
+        } else {
+            panic!("Expected DuplicateId error");
+        }
+    }
+
+    #[test]
+    fn test_multiple_duplicate_ids() {
+        let mut s = CapnpStruct::new("InvalidStruct".to_string());
+        s.add_field(CapnpField::new("field1".to_string(), 0, CapnpType::UInt32));
+        s.add_field(CapnpField::new("field2".to_string(), 0, CapnpType::Text)); // Duplicate ID 0
+        s.add_field(CapnpField::new("field3".to_string(), 1, CapnpType::Bool));
+
+        let mut union = CapnpUnion::new();
+        union.add_variant(CapnpUnionVariant::new(
+            "variant1".to_string(),
+            1,
+            CapnpType::Void,
+        )); // Duplicate ID 1
+        s.set_union(union);
+
+        let result = s.validate();
+        assert!(result.is_err());
+
+        // Should return error for the first duplicate found (order may vary due to HashMap)
+        if let Err(ValidationError::DuplicateId { id, locations }) = result {
+            assert!(id == 0 || id == 1);
+            assert_eq!(locations.len(), 2);
+        } else {
+            panic!("Expected DuplicateId error");
+        }
+    }
+
+    #[test]
+    fn test_document_validation_success() {
+        let mut doc = CapnpDocument::new();
+
+        let mut s1 = CapnpStruct::new("Struct1".to_string());
+        s1.add_field(CapnpField::new("field1".to_string(), 0, CapnpType::UInt32));
+        doc.add_item(CapnpItem::Struct(s1));
+
+        let mut s2 = CapnpStruct::new("Struct2".to_string());
+        s2.add_field(CapnpField::new("field1".to_string(), 0, CapnpType::Text)); // Same ID in different struct is OK
+        doc.add_item(CapnpItem::Struct(s2));
+
+        assert!(doc.validate().is_ok());
+    }
+
+    #[test]
+    fn test_duplicate_ids_between_different_union_groups() {
+        let mut s = CapnpStruct::new("InvalidStruct".to_string());
+        s.add_field(CapnpField::new(
+            "regularField".to_string(),
+            0,
+            CapnpType::UInt32,
+        ));
+
+        let mut union = CapnpUnion::new();
+
+        // First group with fields having IDs 1 and 2
+        let group1_fields = vec![
+            CapnpField::new("width".to_string(), 1, CapnpType::UInt32),
+            CapnpField::new("height".to_string(), 2, CapnpType::UInt32),
+        ];
+        union.add_variant(CapnpUnionVariant::new_group(
+            "dimensions".to_string(),
+            3,
+            group1_fields,
+        ));
+
+        // Second group with field having ID 1 (duplicate with first group)
+        let group2_fields = vec![
+            CapnpField::new("name".to_string(), 1, CapnpType::Text), // Duplicate ID with dimensions.width
+            CapnpField::new("description".to_string(), 4, CapnpType::Text),
+        ];
+        union.add_variant(CapnpUnionVariant::new_group(
+            "metadata".to_string(),
+            5,
+            group2_fields,
+        ));
+
+        s.set_union(union);
+
+        let result = s.validate();
+        assert!(result.is_err());
+
+        if let Err(ValidationError::DuplicateId { id, locations }) = result {
+            assert_eq!(id, 1);
+            assert_eq!(locations.len(), 2);
+            assert!(locations.contains(&"union group 'dimensions' field 'width'".to_string()));
+            assert!(locations.contains(&"union group 'metadata' field 'name'".to_string()));
+        } else {
+            panic!("Expected DuplicateId error");
+        }
+    }
+
+    #[test]
+    fn test_group_field_duplicate_ids() {
+        let mut s = CapnpStruct::new("TestStruct".to_string());
+        let mut union = CapnpUnion::new();
+
+        union.add_variant(CapnpUnionVariant::new_group(
+            "groupA".to_string(),
+            0,
+            vec![CapnpField::new("x".to_string(), 1, CapnpType::UInt32)],
+        ));
+        union.add_variant(CapnpUnionVariant::new_group(
+            "groupB".to_string(),
+            2,
+            vec![
+                CapnpField::new("y".to_string(), 0, CapnpType::Text), // Duplicate ID 0 (same as groupA variant ID)
+            ],
+        ));
+        s.set_union(union);
+
+        let err = s.validate().unwrap_err();
+        let ValidationError::DuplicateId { id, locations } = err;
+        assert_eq!(id, 0);
+        assert_eq!(locations.len(), 2);
+        assert!(locations.contains(&"union variant 'groupA'".to_string()));
+        assert!(locations.contains(&"union group 'groupB' field 'y'".to_string()));
+    }
+
+    // Tests for automatic validation during rendering
+    #[test]
+    fn test_render_validation_failure_struct() {
+        let mut s = CapnpStruct::new("InvalidStruct".to_string());
+        s.add_field(CapnpField::new("field1".to_string(), 0, CapnpType::UInt32));
+        s.add_field(CapnpField::new("field2".to_string(), 0, CapnpType::Text)); // Duplicate ID
+
+        let result = s.render();
+        assert!(result.is_err());
+
+        if let Err(ValidationError::DuplicateId { id, locations }) = result {
+            assert_eq!(id, 0);
+            assert_eq!(locations.len(), 2);
+        } else {
+            panic!("Expected DuplicateId error during render");
+        }
+    }
+
+    #[test]
+    fn test_render_validation_failure_document() {
+        let mut doc = CapnpDocument::new();
+
+        let mut valid_s = CapnpStruct::new("ValidStruct".to_string());
+        valid_s.add_field(CapnpField::new("field1".to_string(), 0, CapnpType::UInt32));
+        doc.add_item(CapnpItem::Struct(valid_s));
+
+        let mut invalid_s = CapnpStruct::new("InvalidStruct".to_string());
+        invalid_s.add_field(CapnpField::new("field1".to_string(), 1, CapnpType::UInt32));
+        invalid_s.add_field(CapnpField::new("field2".to_string(), 1, CapnpType::Text)); // Duplicate ID
+        doc.add_item(CapnpItem::Struct(invalid_s));
+
+        let result = doc.render();
+        assert!(result.is_err());
+
+        if let Err(ValidationError::DuplicateId { id, .. }) = result {
+            assert_eq!(id, 1);
+        } else {
+            panic!("Expected DuplicateId error during document render");
+        }
     }
 }

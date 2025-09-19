@@ -42,6 +42,7 @@ struct Company {
     is_public: bool,
 }
 
+#[allow(dead_code)]
 #[derive(Facet)]
 #[repr(u8)]
 enum Status {
@@ -55,6 +56,7 @@ enum Status {
     Suspended,
 }
 
+#[allow(dead_code)]
 #[derive(Facet)]
 #[repr(u8)]
 enum EnumWithData {
