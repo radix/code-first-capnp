@@ -44,7 +44,14 @@ pub struct CapnpUnion {
 pub struct CapnpUnionVariant {
     pub name: String,
     pub id: u32,
-    pub variant_type: CapnpType,
+    pub variant_type: CapnpVariantType,
+}
+
+/// Represents the type of a union variant (either a type or a group)
+#[derive(Debug, Clone, PartialEq)]
+pub enum CapnpVariantType {
+    Type(CapnpType),
+    Group(Vec<CapnpField>),
 }
 
 /// Represents Cap'n Proto types
@@ -75,9 +82,7 @@ pub enum CapnpType {
 impl CapnpDocument {
     /// Creates a new empty document
     pub fn new() -> Self {
-        Self {
-            items: Vec::new(),
-        }
+        Self { items: Vec::new() }
     }
 
     /// Adds an item to the document
@@ -202,18 +207,44 @@ impl CapnpUnion {
 }
 
 impl CapnpUnionVariant {
-    /// Creates a new union variant
+    /// Creates a new union variant with a type
     pub fn new(name: String, id: u32, variant_type: CapnpType) -> Self {
         Self {
             name,
             id,
-            variant_type,
+            variant_type: CapnpVariantType::Type(variant_type),
+        }
+    }
+
+    /// Creates a new union variant with a group
+    pub fn new_group(name: String, id: u32, fields: Vec<CapnpField>) -> Self {
+        Self {
+            name,
+            id,
+            variant_type: CapnpVariantType::Group(fields),
         }
     }
 
     /// Renders the variant as Cap'n Proto schema text
     pub fn render(&self) -> String {
-        format!("{} @{} :{};", self.name, self.id, self.variant_type.render())
+        match &self.variant_type {
+            CapnpVariantType::Type(ty) => {
+                format!("{} @{} :{};", self.name, self.id, ty.render())
+            }
+            CapnpVariantType::Group(fields) => {
+                if fields.is_empty() {
+                    format!("{} :group @{} {{}};", self.name, self.id)
+                } else {
+                    let mut output = String::new();
+                    output.push_str(&format!("{} :group @{} {{\n", self.name, self.id));
+                    for field in fields {
+                        output.push_str(&format!("      {}\n", field.render()));
+                    }
+                    output.push_str("    };");
+                    output
+                }
+            }
+        }
     }
 }
 
@@ -350,7 +381,11 @@ mod tests {
         s.add_field(CapnpField::new("id".to_string(), 0, CapnpType::UInt64));
 
         let mut union = CapnpUnion::new();
-        union.add_variant(CapnpUnionVariant::new("variant".to_string(), 1, CapnpType::Void));
+        union.add_variant(CapnpUnionVariant::new(
+            "variant".to_string(),
+            1,
+            CapnpType::Void,
+        ));
         s.set_union(union);
 
         let output = s.render();
@@ -401,6 +436,19 @@ mod tests {
     }
 
     #[test]
+    fn test_union_add_group_variant() {
+        let mut union = CapnpUnion::new();
+        let fields = vec![
+            CapnpField::new("field1".to_string(), 0, CapnpType::UInt32),
+            CapnpField::new("field2".to_string(), 1, CapnpType::Text),
+        ];
+        let variant = CapnpUnionVariant::new_group("test".to_string(), 0, fields);
+
+        union.add_variant(variant);
+        assert_eq!(union.variants.len(), 1);
+    }
+
+    #[test]
     fn test_empty_union_render() {
         let union = CapnpUnion::new();
         let output = union.render();
@@ -415,6 +463,27 @@ mod tests {
         let output = variant.render();
 
         assert_eq!(output, "myVariant @10 :Text;");
+    }
+
+    #[test]
+    fn test_union_variant_empty_group_render() {
+        let variant = CapnpUnionVariant::new_group("emptyGroup".to_string(), 5, vec![]);
+        let output = variant.render();
+
+        assert_eq!(output, "emptyGroup :group @5 {};");
+    }
+
+    #[test]
+    fn test_union_variant_group_render() {
+        let fields = vec![
+            CapnpField::new("id".to_string(), 0, CapnpType::UInt64),
+            CapnpField::new("name".to_string(), 1, CapnpType::Text),
+        ];
+        let variant = CapnpUnionVariant::new_group("myGroup".to_string(), 2, fields);
+        let output = variant.render();
+
+        let expected = "myGroup :group @2 {\n      id @0 :UInt64;\n      name @1 :Text;\n    };";
+        assert_eq!(output, expected);
     }
 
     // CapnpType tests - primitive types
@@ -458,7 +527,9 @@ mod tests {
         let nested_list = CapnpType::List(Box::new(CapnpType::List(Box::new(CapnpType::UInt32))));
         assert_eq!(nested_list.render(), "List(List(UInt32))");
 
-        let deeply_nested = CapnpType::List(Box::new(CapnpType::List(Box::new(CapnpType::List(Box::new(CapnpType::Bool))))));
+        let deeply_nested = CapnpType::List(Box::new(CapnpType::List(Box::new(CapnpType::List(
+            Box::new(CapnpType::Bool),
+        )))));
         assert_eq!(deeply_nested.render(), "List(List(List(Bool)))");
     }
 
@@ -483,8 +554,16 @@ mod tests {
         let mut s = CapnpStruct::new("Message".to_string());
 
         let mut union = CapnpUnion::new();
-        union.add_variant(CapnpUnionVariant::new("text".to_string(), 0, CapnpType::Text));
-        union.add_variant(CapnpUnionVariant::new("number".to_string(), 1, CapnpType::UInt32));
+        union.add_variant(CapnpUnionVariant::new(
+            "text".to_string(),
+            0,
+            CapnpType::Text,
+        ));
+        union.add_variant(CapnpUnionVariant::new(
+            "number".to_string(),
+            1,
+            CapnpType::UInt32,
+        ));
 
         s.set_union(union);
 
@@ -500,21 +579,88 @@ mod tests {
     }
 
     #[test]
+    fn test_union_struct_with_groups_rendering() {
+        let mut s = CapnpStruct::new("ComplexMessage".to_string());
+
+        let mut union = CapnpUnion::new();
+        union.add_variant(CapnpUnionVariant::new(
+            "unit".to_string(),
+            0,
+            CapnpType::Void,
+        ));
+
+        let tuple_fields = vec![
+            CapnpField::new("field0".to_string(), 0, CapnpType::UInt32),
+            CapnpField::new("field1".to_string(), 1, CapnpType::Text),
+        ];
+        union.add_variant(CapnpUnionVariant::new_group(
+            "tuple".to_string(),
+            1,
+            tuple_fields,
+        ));
+
+        let struct_fields = vec![
+            CapnpField::new("id".to_string(), 0, CapnpType::UInt64),
+            CapnpField::new("name".to_string(), 1, CapnpType::Text),
+        ];
+        union.add_variant(CapnpUnionVariant::new_group(
+            "struct".to_string(),
+            2,
+            struct_fields,
+        ));
+
+        s.set_union(union);
+
+        let doc = CapnpDocument::with_struct(s);
+        let output = doc.render();
+
+        assert!(output.contains("struct ComplexMessage {"));
+        assert!(output.contains("union {"));
+        assert!(output.contains("unit @0 :Void;"));
+        assert!(output.contains("tuple :group @1 {"));
+        assert!(output.contains("field0 @0 :UInt32;"));
+        assert!(output.contains("field1 @1 :Text;"));
+        assert!(output.contains("struct :group @2 {"));
+        assert!(output.contains("id @0 :UInt64;"));
+        assert!(output.contains("name @1 :Text;"));
+    }
+
+    #[test]
     fn test_complex_struct_with_all_types() {
         let mut s = CapnpStruct::new("ComplexStruct".to_string());
 
         // Add fields with various types
         s.add_field(CapnpField::new("boolField".to_string(), 0, CapnpType::Bool));
         s.add_field(CapnpField::new("intField".to_string(), 1, CapnpType::Int32));
-        s.add_field(CapnpField::new("floatField".to_string(), 2, CapnpType::Float64));
+        s.add_field(CapnpField::new(
+            "floatField".to_string(),
+            2,
+            CapnpType::Float64,
+        ));
         s.add_field(CapnpField::new("textField".to_string(), 3, CapnpType::Text));
-        s.add_field(CapnpField::new("listField".to_string(), 4, CapnpType::List(Box::new(CapnpType::UInt32))));
-        s.add_field(CapnpField::new("customField".to_string(), 5, CapnpType::UserDefined("CustomType".to_string())));
+        s.add_field(CapnpField::new(
+            "listField".to_string(),
+            4,
+            CapnpType::List(Box::new(CapnpType::UInt32)),
+        ));
+        s.add_field(CapnpField::new(
+            "customField".to_string(),
+            5,
+            CapnpType::UserDefined("CustomType".to_string()),
+        ));
 
         // Add union
         let mut union = CapnpUnion::new();
-        union.add_variant(CapnpUnionVariant::new("voidVariant".to_string(), 6, CapnpType::Void));
-        union.add_variant(CapnpUnionVariant::new("textVariant".to_string(), 7, CapnpType::Text));
+        union.add_variant(CapnpUnionVariant::new(
+            "voidVariant".to_string(),
+            6,
+            CapnpType::Void,
+        ));
+        union.add_variant(CapnpUnionVariant::new(
+            "textVariant".to_string(),
+            7,
+            CapnpType::Text,
+        ));
         s.set_union(union);
 
         let output = s.render();
@@ -531,5 +677,4 @@ mod tests {
         assert!(output.contains("voidVariant @6 :Void;"));
         assert!(output.contains("textVariant @7 :Text;"));
     }
-
 }

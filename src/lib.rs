@@ -18,13 +18,47 @@
 //! ## Usage
 //!
 //! Use `capnp_schema_for<T>()` as the main entry point - it works for both structs
-//! and enums, generating complete schemas with all necessary helper structures.
+//! and enums, generating complete schemas.
 //!
 //! ```rust,ignore
 //! // For any type implementing Facet
 //! let schema = capnp_schema_for::<MyType>()?;
 //! println!("{}", schema);
 //! ```
+//!
+//! ## Enum Handling
+//!
+//! Enums are rendered as Cap'n Proto structs containing unions. Variants with associated
+//! data become **groups** within the union rather than separate struct definitions:
+//!
+//! ```rust,ignore
+//! #[derive(Facet)]
+//! enum Message {
+//!     #[facet(capnp:id=0)]
+//!     Text(String),
+//!     #[facet(capnp:id=1)]
+//!     Image { url: String, caption: String },
+//! }
+//! ```
+//!
+//! Generates this Cap'n Proto schema:
+//!
+//! ```capnp
+//! struct Message {
+//!   union {
+//!     Text :group @0 {
+//!       field0 @0 :Text;
+//!     };
+//!     Image :group @1 {
+//!       url @0 :Text;
+//!       caption @1 :Text;
+//!     };
+//!   }
+//! }
+//! ```
+//!
+//! This approach produces cleaner schemas with fewer top-level types compared to
+//! generating separate helper structs for each variant.
 //!
 //! ## Direct Model API Usage
 //!
@@ -51,7 +85,8 @@
 //!
 //! - Put `#[facet(capnp:id=<N>)]` on fields/variants to specify field number (required)
 //! - Optionally `#[facet(name=<foo>)]` to rename in the .capnp
-//! - For enums, both the union struct and variant helper structs are generated automatically
+//! - Enum unit variants become `Void` types in the union
+//! - Enum variants with data become inline groups
 
 use facet::{
     Facet, Field, FieldAttribute, NumericType, PrimitiveType, SequenceType, Shape, ShapeLayout,
@@ -79,22 +114,6 @@ pub fn capnp_schema_for<T: Facet<'static>>() -> Result<String, String> {
 pub fn capnp_union_for<T: Facet<'static>>() -> Result<String, String> {
     let capnp_struct = build_capnp_union_from_shape::<T>()?;
     let document = CapnpDocument::with_struct(capnp_struct);
-    Ok(document.render())
-}
-
-/// Generate helper structs for enum variants with associated data
-pub fn capnp_enum_variant_structs_for<T: Facet<'static>>() -> Result<String, String> {
-    let variant_structs = build_capnp_variant_structs_from_shape::<T>()?;
-
-    if variant_structs.is_empty() {
-        return Ok(String::new());
-    }
-
-    let mut document = CapnpDocument::new();
-    for variant_struct in variant_structs {
-        document.add_item(CapnpItem::Struct(variant_struct));
-    }
-
     Ok(document.render())
 }
 
@@ -306,98 +325,78 @@ pub fn build_capnp_union_from_shape<T: Facet<'static>>() -> Result<CapnpStruct, 
             }
         };
 
-        let capnp_type = match variant.data.kind {
+        match variant.data.kind {
             StructKind::Unit => {
                 // Unit variants become Void in Cap'n Proto
-                CapnpType::Void
+                union.add_variant(CapnpUnionVariant::new(
+                    variant_name.to_string(),
+                    variant_id,
+                    CapnpType::Void,
+                ));
             }
             StructKind::Tuple => {
-                // Tuple variants need their own struct definition
+                // Tuple variants become groups with numbered fields
                 if variant.data.fields.is_empty() {
-                    CapnpType::Void
+                    union.add_variant(CapnpUnionVariant::new(
+                        variant_name.to_string(),
+                        variant_id,
+                        CapnpType::Void,
+                    ));
                 } else {
-                    // Create a reference to a separate struct for tuple data
-                    CapnpType::UserDefined(format!("{}_{}", enum_name, variant_name))
+                    let mut group_fields = Vec::new();
+                    for (field_idx, field) in variant.data.fields.iter().enumerate() {
+                        let field_name = format!("field{}", field_idx);
+                        let capnp_ty = shape_to_capnp_type(field.shape)?;
+                        group_fields.push(CapnpField::new(field_name, field_idx as u32, capnp_ty));
+                    }
+                    union.add_variant(CapnpUnionVariant::new_group(
+                        variant_name.to_string(),
+                        variant_id,
+                        group_fields,
+                    ));
                 }
             }
             StructKind::TupleStruct => {
-                // TupleStruct variants need their own struct definition
+                // TupleStruct variants become groups with numbered fields
                 if variant.data.fields.is_empty() {
-                    CapnpType::Void
+                    union.add_variant(CapnpUnionVariant::new(
+                        variant_name.to_string(),
+                        variant_id,
+                        CapnpType::Void,
+                    ));
                 } else {
-                    // Create a reference to a separate struct for tuple struct data
-                    CapnpType::UserDefined(format!("{}_{}", enum_name, variant_name))
+                    let mut group_fields = Vec::new();
+                    for (field_idx, field) in variant.data.fields.iter().enumerate() {
+                        let field_name = format!("field{}", field_idx);
+                        let capnp_ty = shape_to_capnp_type(field.shape)?;
+                        group_fields.push(CapnpField::new(field_name, field_idx as u32, capnp_ty));
+                    }
+                    union.add_variant(CapnpUnionVariant::new_group(
+                        variant_name.to_string(),
+                        variant_id,
+                        group_fields,
+                    ));
                 }
             }
             StructKind::Struct => {
-                // Named struct variants need their own struct definition
-                CapnpType::UserDefined(format!("{}_{}", enum_name, variant_name))
+                // Named struct variants become groups with named fields
+                let mut group_fields = Vec::new();
+                for (field_idx, field) in variant.data.fields.iter().enumerate() {
+                    let field_name = field.name.to_string();
+                    let capnp_ty = shape_to_capnp_type(field.shape)?;
+                    group_fields.push(CapnpField::new(field_name, field_idx as u32, capnp_ty));
+                }
+                union.add_variant(CapnpUnionVariant::new_group(
+                    variant_name.to_string(),
+                    variant_id,
+                    group_fields,
+                ));
             }
         };
-
-        union.add_variant(CapnpUnionVariant::new(
-            variant_name.to_string(),
-            variant_id,
-            capnp_type,
-        ));
     }
 
     capnp_struct.set_union(union);
     Ok(capnp_struct)
-}
-
-/// Builds variant helper structs for an enum
-pub fn build_capnp_variant_structs_from_shape<T: Facet<'static>>() -> Result<Vec<CapnpStruct>, String> {
-    let shape = T::SHAPE;
-
-    let (enum_name, enum_def) = match shape.ty {
-        Type::User(UserType::Enum(ed)) => (shape.type_identifier, ed),
-        _ => return Err(format!("{} is not an enum", shape.type_identifier)),
-    };
-
-    let mut structs = Vec::new();
-
-    for variant in enum_def.variants.iter() {
-        let variant_name = variant.name;
-
-        // Only generate structs for variants that have associated data
-        match variant.data.kind {
-            StructKind::Unit => {
-                // Unit variants don't need helper structs
-                continue;
-            }
-            StructKind::Tuple | StructKind::TupleStruct => {
-                if variant.data.fields.is_empty() {
-                    continue;
-                }
-
-                // Generate struct for tuple/tuple-struct variant
-                let mut variant_struct = CapnpStruct::new(format!("{}_{}", enum_name, variant_name));
-
-                for (field_idx, field) in variant.data.fields.iter().enumerate() {
-                    let field_name = format!("field{}", field_idx);
-                    let capnp_ty = shape_to_capnp_type(field.shape)?;
-                    variant_struct.add_field(CapnpField::new(field_name, field_idx as u32, capnp_ty));
-                }
-
-                structs.push(variant_struct);
-            }
-            StructKind::Struct => {
-                // Generate struct for named struct variant
-                let mut variant_struct = CapnpStruct::new(format!("{}_{}", enum_name, variant_name));
-
-                for (field_idx, field) in variant.data.fields.iter().enumerate() {
-                    let field_name = field.name.to_string();
-                    let capnp_ty = shape_to_capnp_type(field.shape)?;
-                    variant_struct.add_field(CapnpField::new(field_name, field_idx as u32, capnp_ty));
-                }
-
-                structs.push(variant_struct);
-            }
-        }
-    }
-
-    Ok(structs)
 }
 
 /// Builds a complete CapnpDocument for any supported type
@@ -412,24 +411,20 @@ pub fn build_capnp_document_from_shape<T: Facet<'static>>() -> Result<CapnpDocum
             document.add_item(CapnpItem::Struct(capnp_struct));
         }
         Type::User(UserType::Enum(_)) => {
-            // For enums, generate both the union and the variant structs
+            // For enums, generate only the union struct with groups
             let union_struct = build_capnp_union_from_shape::<T>()?;
             document.add_item(CapnpItem::Struct(union_struct));
-
-            let variant_structs = build_capnp_variant_structs_from_shape::<T>()?;
-            for variant_struct in variant_structs {
-                document.add_item(CapnpItem::Struct(variant_struct));
-            }
         }
         _ => {
-            return Err(format!("{} is not a supported type (must be struct or enum)", shape.type_identifier));
+            return Err(format!(
+                "{} is not a supported type (must be struct or enum)",
+                shape.type_identifier
+            ));
         }
     }
 
     Ok(document)
 }
-
-
 
 #[cfg(test)]
 mod tests {
@@ -470,7 +465,10 @@ mod tests {
         let numbers_field = &capnp_struct.fields[2];
         assert_eq!(numbers_field.name, "numbers");
         assert_eq!(numbers_field.id, 2);
-        assert_eq!(numbers_field.field_type, CapnpType::List(Box::new(CapnpType::Int32)));
+        assert_eq!(
+            numbers_field.field_type,
+            CapnpType::List(Box::new(CapnpType::Int32))
+        );
 
         let active_field = &capnp_struct.fields[3];
         assert_eq!(active_field.name, "active");
@@ -531,29 +529,39 @@ mod tests {
 
     #[test]
     fn test_simple_enum_union_model() {
-        let union_struct = build_capnp_union_from_shape::<Status>().unwrap();
+        let capnp_union = build_capnp_union_from_shape::<Status>().unwrap();
 
-        assert_eq!(union_struct.name, "Status");
-        assert!(union_struct.fields.is_empty());
-        assert!(union_struct.union.is_some());
+        assert_eq!(capnp_union.name, "Status");
+        assert!(capnp_union.fields.is_empty()); // No top-level fields, just union
+        assert!(capnp_union.union.is_some());
 
-        let union = union_struct.union.unwrap();
+        let union = capnp_union.union.unwrap();
         assert_eq!(union.variants.len(), 3);
 
+        // Check each variant
         let active_variant = &union.variants[0];
         assert_eq!(active_variant.name, "Active");
         assert_eq!(active_variant.id, 0);
-        assert_eq!(active_variant.variant_type, CapnpType::Void);
+        assert!(matches!(
+            active_variant.variant_type,
+            CapnpVariantType::Type(CapnpType::Void)
+        ));
 
         let inactive_variant = &union.variants[1];
         assert_eq!(inactive_variant.name, "Inactive");
         assert_eq!(inactive_variant.id, 1);
-        assert_eq!(inactive_variant.variant_type, CapnpType::Void);
+        assert!(matches!(
+            inactive_variant.variant_type,
+            CapnpVariantType::Type(CapnpType::Void)
+        ));
 
         let pending_variant = &union.variants[2];
         assert_eq!(pending_variant.name, "Pending");
         assert_eq!(pending_variant.id, 2);
-        assert_eq!(pending_variant.variant_type, CapnpType::Void);
+        assert!(matches!(
+            pending_variant.variant_type,
+            CapnpVariantType::Type(CapnpType::Void)
+        ));
     }
 
     #[test]
@@ -570,56 +578,40 @@ mod tests {
         let unit_variant = &union.variants[0];
         assert_eq!(unit_variant.name, "Unit");
         assert_eq!(unit_variant.id, 0);
-        assert_eq!(unit_variant.variant_type, CapnpType::Void);
+        assert!(matches!(
+            unit_variant.variant_type,
+            CapnpVariantType::Type(CapnpType::Void)
+        ));
 
         let tuple_variant = &union.variants[1];
         assert_eq!(tuple_variant.name, "Tuple");
         assert_eq!(tuple_variant.id, 1);
-        assert_eq!(tuple_variant.variant_type, CapnpType::UserDefined("ComplexEnum_Tuple".to_string()));
+        if let CapnpVariantType::Group(fields) = &tuple_variant.variant_type {
+            assert_eq!(fields.len(), 2);
+            assert_eq!(fields[0].name, "field0");
+            assert_eq!(fields[0].id, 0);
+            assert_eq!(fields[0].field_type, CapnpType::UInt32);
+            assert_eq!(fields[1].name, "field1");
+            assert_eq!(fields[1].id, 1);
+            assert_eq!(fields[1].field_type, CapnpType::Text);
+        } else {
+            panic!("Expected Group variant type");
+        }
 
         let struct_variant = &union.variants[2];
         assert_eq!(struct_variant.name, "Struct");
         assert_eq!(struct_variant.id, 2);
-        assert_eq!(struct_variant.variant_type, CapnpType::UserDefined("ComplexEnum_Struct".to_string()));
-    }
-
-    #[test]
-    fn test_enum_variant_structs_model() {
-        let variant_structs = build_capnp_variant_structs_from_shape::<ComplexEnum>().unwrap();
-
-        assert_eq!(variant_structs.len(), 2); // Unit variant doesn't get a helper struct
-
-        // Check the Tuple variant struct
-        let tuple_struct = &variant_structs[0];
-        assert_eq!(tuple_struct.name, "ComplexEnum_Tuple");
-        assert_eq!(tuple_struct.fields.len(), 2);
-        assert!(tuple_struct.union.is_none());
-
-        let field0 = &tuple_struct.fields[0];
-        assert_eq!(field0.name, "field0");
-        assert_eq!(field0.id, 0);
-        assert_eq!(field0.field_type, CapnpType::UInt32);
-
-        let field1 = &tuple_struct.fields[1];
-        assert_eq!(field1.name, "field1");
-        assert_eq!(field1.id, 1);
-        assert_eq!(field1.field_type, CapnpType::Text);
-
-        // Check the Struct variant struct
-        let struct_struct = &variant_structs[1];
-        assert_eq!(struct_struct.name, "ComplexEnum_Struct");
-        assert_eq!(struct_struct.fields.len(), 2);
-        assert!(struct_struct.union.is_none());
-
-        let id_field = &struct_struct.fields[0];
-        assert_eq!(id_field.name, "id");
-        assert_eq!(id_field.id, 0);
-        assert_eq!(id_field.field_type, CapnpType::UInt64);
-
-        let name_field = &struct_struct.fields[1];
-        assert_eq!(name_field.name, "name");
-        assert_eq!(name_field.id, 1);
-        assert_eq!(name_field.field_type, CapnpType::Text);
+        if let CapnpVariantType::Group(fields) = &struct_variant.variant_type {
+            assert_eq!(fields.len(), 2);
+            assert_eq!(fields[0].name, "id");
+            assert_eq!(fields[0].id, 0);
+            assert_eq!(fields[0].field_type, CapnpType::UInt64);
+            assert_eq!(fields[1].name, "name");
+            assert_eq!(fields[1].id, 1);
+            assert_eq!(fields[1].field_type, CapnpType::Text);
+        } else {
+            panic!("Expected Group variant type");
+        }
     }
 
     #[derive(Facet)]
@@ -656,7 +648,7 @@ mod tests {
     fn test_unified_complex_enum_document_model() {
         let document = build_capnp_document_from_shape::<ComplexEnum>().unwrap();
 
-        assert_eq!(document.items.len(), 3); // Union struct + 2 variant structs
+        assert_eq!(document.items.len(), 1); // Only union struct with groups
 
         // First item should be the main union struct
         let CapnpItem::Struct(main_struct) = &document.items[0];
@@ -667,17 +659,33 @@ mod tests {
         let union = main_struct.union.as_ref().unwrap();
         assert_eq!(union.variants.len(), 3);
 
-        // Second item should be the Tuple variant struct
-        let CapnpItem::Struct(tuple_struct) = &document.items[1];
-        assert_eq!(tuple_struct.name, "ComplexEnum_Tuple");
-        assert_eq!(tuple_struct.fields.len(), 2);
-        assert!(tuple_struct.union.is_none());
+        // Check that variants are groups instead of separate structs
+        let unit_variant = &union.variants[0];
+        assert_eq!(unit_variant.name, "Unit");
+        assert!(matches!(
+            unit_variant.variant_type,
+            CapnpVariantType::Type(CapnpType::Void)
+        ));
 
-        // Third item should be the Struct variant struct
-        let CapnpItem::Struct(struct_struct) = &document.items[2];
-        assert_eq!(struct_struct.name, "ComplexEnum_Struct");
-        assert_eq!(struct_struct.fields.len(), 2);
-        assert!(struct_struct.union.is_none());
+        let tuple_variant = &union.variants[1];
+        assert_eq!(tuple_variant.name, "Tuple");
+        if let CapnpVariantType::Group(fields) = &tuple_variant.variant_type {
+            assert_eq!(fields.len(), 2);
+            assert_eq!(fields[0].name, "field0");
+            assert_eq!(fields[1].name, "field1");
+        } else {
+            panic!("Expected Group variant type for Tuple");
+        }
+
+        let struct_variant = &union.variants[2];
+        assert_eq!(struct_variant.name, "Struct");
+        if let CapnpVariantType::Group(fields) = &struct_variant.variant_type {
+            assert_eq!(fields.len(), 2);
+            assert_eq!(fields[0].name, "id");
+            assert_eq!(fields[1].name, "name");
+        } else {
+            panic!("Expected Group variant type for Struct");
+        }
     }
 
     #[test]
@@ -696,7 +704,10 @@ mod tests {
 
         // All variants should be Void type
         for variant in &union.variants {
-            assert_eq!(variant.variant_type, CapnpType::Void);
+            assert!(matches!(
+                variant.variant_type,
+                CapnpVariantType::Type(CapnpType::Void)
+            ));
         }
     }
 
@@ -719,40 +730,12 @@ mod tests {
         let capnp_struct = build_capnp_struct_from_shape::<TestStruct>().unwrap();
 
         // Test various type mappings are covered
-        let field_types: Vec<&CapnpType> = capnp_struct.fields.iter()
-            .map(|f| &f.field_type)
-            .collect();
+        let field_types: Vec<&CapnpType> =
+            capnp_struct.fields.iter().map(|f| &f.field_type).collect();
 
         assert!(field_types.contains(&&CapnpType::UInt64));
         assert!(field_types.contains(&&CapnpType::Text));
         assert!(field_types.contains(&&CapnpType::Bool));
         assert!(field_types.contains(&&CapnpType::List(Box::new(CapnpType::Int32))));
-    }
-
-    #[test]
-    fn test_empty_variant_structs() {
-        // Test that Status enum (with only unit variants) produces no variant structs
-        let variant_structs = build_capnp_variant_structs_from_shape::<Status>().unwrap();
-        assert!(variant_structs.is_empty());
-    }
-
-    #[test]
-    fn test_rendering_integration() {
-        // Test that the model can be rendered back to schema text correctly
-        let document = build_capnp_document_from_shape::<TestStruct>().unwrap();
-        let schema_text = document.render();
-
-        // Basic sanity checks that the rendering works
-        assert!(schema_text.contains("struct TestStruct"));
-        assert!(schema_text.contains("id @0 :UInt64;"));
-        assert!(schema_text.contains("fullName @1 :Text;"));
-
-        // Test enum rendering too
-        let enum_document = build_capnp_document_from_shape::<Status>().unwrap();
-        let enum_schema = enum_document.render();
-
-        assert!(enum_schema.contains("struct Status"));
-        assert!(enum_schema.contains("union {"));
-        assert!(enum_schema.contains("Active @0 :Void;"));
     }
 }
