@@ -5,3 +5,4 @@ edition = "2024"
 
 [dependencies]
 facet = "0.29"
+heck = "0.5"
