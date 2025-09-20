@@ -24,7 +24,6 @@ Add to your `Cargo.toml`:
 ```toml
 [dependencies]
 code-first-capnp = "0.1.0"
-code-first-capnp-macros = "0.1.0"
 ```
 
 Define your types:
@@ -60,71 +59,6 @@ pub enum Status {
     Pending,
 }
 ```
-
-Generate the schema:
-
-```rust
-use code_first_capnp::{build_capnp_file, schema_for_item};
-
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Generate schema for a single type
-    let person_schema = Person::get_capnp_schema();
-    let schema_text = schema_for_item(&person_schema)?;
-    println!("{}", schema_text);
-
-    // Or generate a complete file with multiple types
-    let items = &[
-        Person::get_capnp_schema(),
-        Status::get_capnp_schema(),
-    ];
-    let file_id = 0xabcd1234u64;
-    let complete_schema = build_capnp_file(file_id, items)?;
-    println!("{}", complete_schema);
-
-    Ok(())
-}
-```
-
-This generates:
-
-```capnp
-@0xabcd1234;
-
-struct Person {
-  id @0 :UInt64;
-  fullName @1 :Text;
-  emailAddresses @2 :List(Text);
-  age @3 :UInt16;
-  isActive @4 :Bool;
-}
-
-struct Status {
-  union {
-    active @0 :Void;
-    inactive @1 :Void;
-    pending @2 :Void;
-  }
-}
-```
-
-## Supported Types
-
-### Primitives
-
-- `bool` → `Bool`
-- `u8`, `u16`, `u32`, `u64` → `UInt8`, `UInt16`, `UInt32`, `UInt64`
-- `i8`, `i16`, `i32`, `i64` → `Int8`, `Int16`, `Int32`, `Int64`
-- `f32`, `f64` → `Float32`, `Float64`
-- `String` → `Text`
-
-### Collections
-
-- `Vec<T>` → `List(T)`
-
-### User-defined
-
-- Structs → Cap'n Proto structs
-- Enums → Cap'n Proto structs with unions
 
 ## Advanced Features
 

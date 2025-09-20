@@ -184,11 +184,12 @@ pub fn complete_capnp_schema(input: TokenStream) -> TokenStream {
         .into();
     }
 
+    let target_dir = TARGET_DIR.join("code-first-capnp");
     // Use capnpc to compile the schema
     if let Err(e) = capnpc::CompilerCommand::new()
         .src_prefix(&manifest_dir)
         .file(&schema_path)
-        .output_path(&manifest_dir)
+        .output_path(&target_dir)
         .run()
     {
         return syn::Error::new(
@@ -200,10 +201,11 @@ pub fn complete_capnp_schema(input: TokenStream) -> TokenStream {
     }
 
     // Generate a manual include of the generated file
-    let generated_file = format!("../{}_capnp.rs", filename.trim_end_matches(".capnp"));
+    let path = target_dir.join(format!("{}_capnp.rs", filename.trim_end_matches(".capnp")));
+    let path_str = path.to_str().unwrap();
     quote! {
         #module_decl_tokens {
-            include!(#generated_file);
+            include!(#path_str);
         }
     }
     .into()
@@ -825,3 +827,37 @@ fn extract_schema_filename(attrs: &[Attribute]) -> Result<String> {
         "No capnp file attribute found",
     ))
 }
+
+static TARGET_DIR: LazyLock<PathBuf> = LazyLock::new(|| {
+    // 1) If OUT_DIR (from a build.rs somewhere) is set, just use it
+    use std::io::Write;
+
+    let mut logfile = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("/tmp/radixhack.log")
+        .unwrap();
+    if let Ok(out_dir) = std::env::var("OUT_DIR") {
+        // Log the OUT_DIR value for debugging
+        writeln!(logfile, "OUT_DIR: {out_dir}").unwrap();
+        return PathBuf::from(&out_dir);
+    }
+
+    // 2) Respect explicit CARGO_TARGET_DIR
+    if let Ok(dir) = std::env::var("CARGO_TARGET_DIR") {
+        writeln!(logfile, "CARGO_TARGET_DIR: {dir}").unwrap();
+        return PathBuf::from(dir);
+    }
+
+    // 3) Ask Cargo for the workspace target_directory
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".into());
+    let mut cmd = cargo_metadata::MetadataCommand::new();
+    cmd.current_dir(&manifest_dir);
+    let meta = cmd
+        .no_deps()
+        .exec()
+        .expect("failed to run `cargo metadata`");
+    let metadata_dir = meta.target_directory.into_std_path_buf();
+    writeln!(logfile, "metadata dir: {metadata_dir:?}").unwrap();
+    metadata_dir
+});

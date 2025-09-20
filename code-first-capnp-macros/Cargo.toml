@@ -14,4 +14,4 @@ heck.workspace = true
 proc-macro-crate = "3.0"
 capnp-model.workspace = true
 capnpc.workspace = true
-
+cargo_metadata = "0.22"
