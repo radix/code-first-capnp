@@ -3,8 +3,8 @@ resolver = "3"
 members = [
     "code-first-capnp",
     "code-first-capnp-macros",
-    "examples/demo-types",
-    "examples/demo-run",
+    "capnp-model",
+    "examples/demo",
 ]
 
 [workspace.package]
@@ -19,4 +19,5 @@ heck = "0.5"
 capnp = "0.21"
 capnpc = "0.21"
 code-first-capnp-macros = { path = "code-first-capnp-macros" }
+capnp-model = { path = "capnp-model" }
 proc-macro-crate = "3.0"

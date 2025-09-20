@@ -1,6 +1,10 @@
+use code_first_capnp::{capnp_schema_file, complete_capnp_schema};
 use code_first_capnp_macros::CapnpType;
 
+capnp_schema_file!("demo.capnp", 0xfbb45a811fbe71f5);
+
 #[derive(CapnpType)]
+#[capnp(file = "demo.capnp")]
 #[allow(dead_code)]
 pub struct Person {
     #[capnp(id = 0)]
@@ -29,6 +33,7 @@ pub struct Person {
 }
 
 #[derive(CapnpType)]
+#[capnp(file = "demo.capnp")]
 #[allow(dead_code)]
 pub struct Company {
     #[capnp(id = 0, name = "companyName")]
@@ -46,7 +51,7 @@ pub struct Company {
 
 #[allow(dead_code)]
 #[derive(CapnpType)]
-#[repr(u8)]
+#[capnp(file = "demo.capnp")]
 pub enum Status {
     #[capnp(id = 0)]
     Active,
@@ -60,7 +65,7 @@ pub enum Status {
 
 #[allow(dead_code)]
 #[derive(CapnpType)]
-#[repr(u8)]
+#[capnp(file = "demo.capnp")]
 pub enum EnumWithData {
     MyText(#[capnp(id = 0)] String),
     Image {
@@ -76,6 +81,7 @@ pub enum EnumWithData {
 // This struct has removed some fields but maintains them in the schema
 #[derive(CapnpType)]
 #[allow(dead_code)]
+#[capnp(file = "demo.capnp")]
 #[capnp(extra = "oldUserId @1 :UInt64")]
 #[capnp(extra = "deprecatedTimestamp @3 :UInt64")]
 #[capnp(extra = "removedMetadata @6 :Text")]
@@ -94,22 +100,7 @@ pub struct UserProfileV2 {
 }
 
 #[derive(CapnpType)]
+#[capnp(file = "demo.capnp")]
 pub struct EmptyStruct;
 
-/// Generate the Cap'n Proto schema for all the demo types
-pub fn generate_schema() -> Result<String, Box<dyn std::error::Error>> {
-    // Collect all the schema items we want to include in the schema
-    let items = &[
-        Company::get_capnp_schema(),
-        Person::get_capnp_schema(),
-        Status::get_capnp_schema(),
-        EnumWithData::get_capnp_schema(),
-        EmptyStruct::get_capnp_schema(),
-        UserProfileV2::get_capnp_schema(),
-    ];
-
-    // Generate the complete schema file with a file ID
-    // this file ID was generated with `capnpc -i`
-    let file_id = 0xfbb45a811fbe71f5;
-    code_first_capnp::build_capnp_file(file_id, items)
-}
+complete_capnp_schema!("demo.capnp", pub mod demo_capnp);

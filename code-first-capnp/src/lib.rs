@@ -38,14 +38,13 @@
 //! Enums are rendered as Cap'n Proto structs containing unions. Variants with associated
 //! data become **groups** within the union rather than separate struct definitions.
 
-pub mod capnp_model;
 pub use capnp_model::{
     CapnpType, Field as CapnpField, Schema, SchemaItem, Struct, Union, UnionVariant,
     UnionVariantInner,
 };
 
-// Re-export the proc macro
-pub use code_first_capnp_macros::CapnpType;
+// Re-export the proc macros
+pub use code_first_capnp_macros::{CapnpType, capnp_schema_file, complete_capnp_schema};
 
 /// Builds a complete Cap'n Proto schema file with the given ID and schema items
 pub fn build_capnp_file(

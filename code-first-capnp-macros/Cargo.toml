@@ -12,3 +12,6 @@ syn.workspace = true
 quote.workspace = true
 heck.workspace = true
 proc-macro-crate = "3.0"
+capnp-model.workspace = true
+capnpc.workspace = true
+

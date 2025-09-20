@@ -1,5 +1,5 @@
 use capnp::message;
-use demo_run::demo_capnp;
+use demo::demo_capnp;
 
 fn main() -> capnp::Result<()> {
     // Test that we can actually create and use the generated types

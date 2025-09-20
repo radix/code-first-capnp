@@ -1,12 +1,9 @@
 [package]
-name = "demo-types"
+name = "demo"
 version.workspace = true
 edition.workspace = true
-
-[[bin]]
-name = "demo-types"
-path = "src/main.rs"
 
 [dependencies]
 code-first-capnp = { path = "../../code-first-capnp" }
 code-first-capnp-macros.workspace = true
+capnp.workspace = true
