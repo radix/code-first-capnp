@@ -60,6 +60,42 @@
 //! This approach produces cleaner schemas with fewer top-level types compared to
 //! generating separate helper structs for each variant.
 //!
+//! ## Backwards Compatibility with Extra Fields
+//!
+//! Cap'n Proto requires that field IDs never have gaps and that deleted fields remain
+//! in the schema for backwards compatibility. To support this, you can use the
+//! `#[facet(capnp:extra="...")]` attribute on structs and enums to include
+//! deleted/deprecated fields in the generated schema:
+//!
+//! ```rust,ignore
+//! #[derive(Facet)]
+//! #[facet(capnp:extra="oldUserId @1 :UInt64")]
+//! #[facet(capnp:extra="deprecatedFlag @3 :Bool")]
+//! struct UserProfile {
+//!     #[facet(capnp:id=0)]
+//!     username: String,
+//!     #[facet(capnp:id=2)]
+//!     email: String,
+//!     #[facet(capnp:id=4)]
+//!     active: bool,
+//! }
+//! ```
+//!
+//! This generates:
+//!
+//! ```capnp
+//! struct UserProfile {
+//!   username @0 :Text;
+//!   email @2 :Text;
+//!   active @4 :Bool;
+//!   oldUserId @1 :UInt64;
+//!   deprecatedFlag @3 :Bool;
+//! }
+//! ```
+//!
+//! This way you can remove fields from your Rust code while maintaining Cap'n Proto
+//! schema compatibility.
+//!
 //! ## Direct Model API Usage
 //!
 //! You can also work with the document model directly for more control:
@@ -85,12 +121,13 @@
 //!
 //! - Put `#[facet(capnp:id=<N>)]` on fields/variants to specify field number (required)
 //! - Optionally `#[facet(name=<foo>)]` to rename in the .capnp
+//! - Use `#[facet(capnp:extra="fieldName @N :Type")]` on types for backwards compatibility
 //! - Enum unit variants become `Void` types in the union
 //! - Enum variants with data become inline groups
 
 use facet::{
-    Facet, Field, FieldAttribute, NumericType, PrimitiveType, SequenceType, Shape, ShapeLayout,
-    StructKind, TextualType, Type, UserType,
+    Facet, Field, FieldAttribute, NumericType, PrimitiveType, SequenceType, Shape, ShapeAttribute,
+    ShapeLayout, StructKind, TextualType, Type, UserType,
 };
 use heck::ToLowerCamelCase;
 
@@ -169,6 +206,25 @@ fn capnp_overrides_from_attrs(field: &Field) -> (Option<String>, Option<u32>) {
         }
     }
     (name, id)
+}
+
+fn extract_capnp_extra_fields_from_shape_attrs(shape: &'static Shape) -> Vec<String> {
+    let mut extra_fields = Vec::new();
+
+    for attr in shape.attributes {
+        if let ShapeAttribute::Arbitrary(s) = attr {
+            // Parse attributes in the format: 'capnp : extra = "fieldName @3 :UInt64"'
+            if let Some(rest) = s.strip_prefix("capnp : extra = ") {
+                // Remove surrounding quotes if present
+                let extra_value = rest.trim().trim_matches('"');
+                if !extra_value.is_empty() {
+                    extra_fields.push(extra_value.to_string());
+                }
+            }
+        }
+    }
+
+    extra_fields
 }
 
 /// Minimal mapping from facet `Shape` to Cap'n Proto type tokens.
@@ -278,6 +334,12 @@ pub fn build_capnp_struct_from_shape<T: Facet<'static>>() -> Result<Struct, Stri
 
     let mut capnp_struct = Struct::new(st_name.to_string());
 
+    // Extract extra fields from struct-level attributes
+    let extra_fields = extract_capnp_extra_fields_from_shape_attrs(shape);
+    for extra_field in extra_fields {
+        capnp_struct.add_extra_field(extra_field);
+    }
+
     // Only record/tuple structs are supported here; unit struct becomes empty record.
     if matches!(st.kind, StructKind::Unit) {
         return Ok(capnp_struct);
@@ -321,6 +383,12 @@ pub fn build_capnp_union_from_shape<T: Facet<'static>>() -> Result<Struct, Strin
 
     let mut capnp_struct = Struct::new(enum_name.to_string());
     let mut union = Union::new();
+
+    // Extract extra fields from enum-level attributes
+    let extra_fields = extract_capnp_extra_fields_from_shape_attrs(shape);
+    for extra_field in extra_fields {
+        capnp_struct.add_extra_field(extra_field);
+    }
 
     // Build union variants
     for variant in enum_def.variants.iter() {
@@ -504,6 +572,7 @@ mod tests {
                 },
             ],
             union: None,
+            extra_fields: vec![],
         };
 
         assert_eq!(capnp_struct, expected);
@@ -520,6 +589,7 @@ mod tests {
             name: "EmptyStruct".to_string(),
             fields: vec![],
             union: None,
+            extra_fields: vec![],
         };
 
         assert_eq!(capnp_struct, expected);
@@ -603,6 +673,7 @@ mod tests {
                     },
                 ],
             }),
+            extra_fields: vec![],
         };
 
         assert_eq!(capnp_union, expected);
@@ -656,6 +727,7 @@ mod tests {
                     },
                 ],
             }),
+            extra_fields: vec![],
         };
 
         assert_eq!(union_struct, expected);
@@ -712,6 +784,7 @@ mod tests {
                     },
                 ],
                 union: None,
+                extra_fields: vec![],
             })],
         };
 
@@ -766,6 +839,7 @@ mod tests {
                         },
                     ],
                 }),
+                extra_fields: vec![],
             })],
         };
         assert_eq!(document, expected);
@@ -803,6 +877,7 @@ mod tests {
                         },
                     ],
                 }),
+                extra_fields: vec![],
             })],
         };
         assert_eq!(schema, expected);
@@ -903,7 +978,138 @@ mod tests {
                     },
                 ],
             }),
+            extra_fields: vec![],
         };
         assert_eq!(union_struct, expected);
+    }
+
+    // Test struct with extra fields for backwards compatibility
+    #[derive(Facet)]
+    #[facet(capnp:extra="deletedField @5 :UInt32")]
+    #[facet(capnp:extra="anotherDeletedField @10 :Text")]
+    struct StructWithExtraFields {
+        #[facet(capnp:id=0)]
+        active_field: String,
+    }
+
+    #[test]
+    fn test_struct_with_extra_fields() {
+        let capnp_struct = build_capnp_struct_from_shape::<StructWithExtraFields>().unwrap();
+
+        let expected = Struct {
+            name: "StructWithExtraFields".to_string(),
+            fields: vec![CapnpField {
+                name: "activeField".to_string(),
+                id: 0,
+                field_type: CapnpType::Text,
+            }],
+            union: None,
+            extra_fields: vec![
+                "deletedField @5 :UInt32".to_string(),
+                "anotherDeletedField @10 :Text".to_string(),
+            ],
+        };
+
+        assert_eq!(capnp_struct, expected);
+    }
+
+    // Test enum with extra fields for backwards compatibility
+    #[derive(Facet)]
+    #[facet(capnp:extra="deletedVariant @15 :Void")]
+    #[repr(u8)]
+    #[allow(dead_code)]
+    enum EnumWithExtraFields {
+        #[facet(capnp:id=0)]
+        ActiveVariant,
+    }
+
+    #[test]
+    fn test_enum_with_extra_fields() {
+        let union_struct = build_capnp_union_from_shape::<EnumWithExtraFields>().unwrap();
+
+        let expected = Struct {
+            name: "EnumWithExtraFields".to_string(),
+            fields: vec![],
+            union: Some(Union {
+                variants: vec![UnionVariant {
+                    name: "activeVariant".to_string(),
+                    variant_inner: UnionVariantInner::Type {
+                        id: 0,
+                        capnp_type: CapnpType::Void,
+                    },
+                }],
+            }),
+            extra_fields: vec!["deletedVariant @15 :Void".to_string()],
+        };
+
+        assert_eq!(union_struct, expected);
+    }
+
+    #[test]
+    fn test_extra_fields_schema_rendering() {
+        let schema = capnp_schema_for::<StructWithExtraFields>().unwrap();
+
+        // Check that the extra fields are included in the rendered schema
+        assert!(schema.contains("deletedField @5 :UInt32;"));
+        assert!(schema.contains("anotherDeletedField @10 :Text;"));
+        assert!(schema.contains("activeField @0 :Text;"));
+    }
+
+    // More comprehensive example showing extra fields in action
+    #[derive(Facet)]
+    #[facet(capnp:extra="oldUserId @1 :UInt64")]
+    #[facet(capnp:extra="deprecatedFlag @3 :Bool")]
+    #[facet(capnp:extra="removedTimestamp @7 :UInt64")]
+    struct UserProfile {
+        #[facet(capnp:id=0)]
+        username: String,
+        #[facet(capnp:id=2)]
+        email: String,
+        #[facet(capnp:id=4)]
+        active: bool,
+        #[facet(capnp:id=5)]
+        tags: Vec<String>,
+    }
+
+    #[test]
+    fn test_comprehensive_extra_fields_example() {
+        let schema = capnp_schema_for::<UserProfile>().unwrap();
+
+        println!("Generated Cap'n Proto schema:\n{}", schema);
+
+        // Verify the schema contains both active fields and extra fields
+        let expected_schema = "struct UserProfile {\n  username @0 :Text;\n  email @2 :Text;\n  active @4 :Bool;\n  tags @5 :List(Text);\n  oldUserId @1 :UInt64;\n  deprecatedFlag @3 :Bool;\n  removedTimestamp @7 :UInt64;\n}\n";
+        assert_eq!(schema, expected_schema);
+    }
+
+    #[derive(Facet)]
+    #[facet(capnp:extra="oldVariant @8 :Void")]
+    #[facet(capnp:extra="deprecatedData @9 :UInt32")]
+    #[repr(u8)]
+    #[allow(dead_code)]
+    enum MessageType {
+        #[facet(capnp:id=0)]
+        Text,
+        Data {
+            #[facet(capnp:id=1)]
+            payload: Vec<u8>,
+            #[facet(capnp:id=2)]
+            format: String,
+        },
+    }
+
+    #[test]
+    fn test_enum_extra_fields_comprehensive() {
+        let schema = capnp_schema_for::<MessageType>().unwrap();
+
+        println!("Generated enum schema with extra fields:\n{}", schema);
+
+        // Check that both union variants and extra fields are present
+        assert!(schema.contains("text @0 :Void;"));
+        assert!(schema.contains("data :group"));
+        assert!(schema.contains("payload @1 :List(UInt8);"));
+        assert!(schema.contains("format @2 :Text;"));
+        assert!(schema.contains("oldVariant @8 :Void;"));
+        assert!(schema.contains("deprecatedData @9 :UInt32;"));
     }
 }

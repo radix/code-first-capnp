@@ -70,6 +70,26 @@ enum EnumWithData {
     Video(#[facet(capnp:id=3)] String, #[facet(capnp:id=4)] u32),
 }
 
+// Example showing backwards compatibility with extra fields
+// This struct has removed some fields but maintains them in the schema
+#[derive(Facet)]
+#[facet(capnp:extra="oldUserId @1 :UInt64")]
+#[facet(capnp:extra="deprecatedTimestamp @3 :UInt64")]
+#[facet(capnp:extra="removedMetadata @6 :Text")]
+struct UserProfileV2 {
+    #[facet(capnp:id=0)]
+    username: String,
+
+    #[facet(capnp:id=2)]
+    email: String,
+
+    #[facet(capnp:id=4)]
+    active: bool,
+
+    #[facet(capnp:id=5)]
+    preferences: Vec<String>,
+}
+
 #[derive(Facet)]
 struct EmptyStruct;
 
@@ -91,6 +111,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let empty_schema = code_first_capnp::capnp_schema_for::<EmptyStruct>()?;
     println!("{empty_schema}");
+
+    println!("# Backwards compatibility example with extra fields");
+    let profile_schema = code_first_capnp::capnp_schema_for::<UserProfileV2>()?;
+    println!("{profile_schema}");
 
     Ok(())
 }

@@ -41,6 +41,7 @@ pub struct Struct {
     pub name: String,
     pub fields: Vec<Field>,
     pub union: Option<Union>,
+    pub extra_fields: Vec<String>,
 }
 
 /// Represents a field in a Cap'n Proto struct
@@ -159,6 +160,7 @@ impl Struct {
             name,
             fields: Vec::new(),
             union: None,
+            extra_fields: Vec::new(),
         }
     }
 
@@ -170,6 +172,11 @@ impl Struct {
     /// Sets the union for this struct
     pub fn set_union(&mut self, union: Union) {
         self.union = Some(union);
+    }
+
+    /// Adds an extra field (for backwards compatibility)
+    pub fn add_extra_field(&mut self, extra_field: String) {
+        self.extra_fields.push(extra_field);
     }
 
     /// Validates that all IDs in the struct are unique
@@ -228,6 +235,11 @@ impl Struct {
         // Render regular fields
         for field in &self.fields {
             writeln!(&mut output, "  {}", field.render()).unwrap();
+        }
+
+        // Render extra fields (for backwards compatibility)
+        for extra_field in &self.extra_fields {
+            writeln!(&mut output, "  {};", extra_field).unwrap();
         }
 
         // Render union if present
