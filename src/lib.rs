@@ -360,7 +360,6 @@ fn shape_to_capnp_type(shape: &'static Shape) -> Result<CapnpType, String> {
 
 /// Builds a CapnpStruct from a facet struct shape
 pub fn build_capnp_struct_from_shape(shape: &'static Shape) -> Result<Struct, String> {
-
     let (st_name, st) = match shape.ty {
         Type::User(UserType::Struct(sd)) => (shape.type_identifier, sd),
         _ => return Err(format!("{} is not a struct", shape.type_identifier)),
@@ -408,7 +407,6 @@ pub fn build_capnp_struct_from_shape(shape: &'static Shape) -> Result<Struct, St
 
 /// Builds a CapnpStruct with union from a facet enum shape
 pub fn build_capnp_union_from_shape(shape: &'static Shape) -> Result<Struct, String> {
-
     let (enum_name, enum_def) = match shape.ty {
         Type::User(UserType::Enum(ed)) => (shape.type_identifier, ed),
         _ => return Err(format!("{} is not an enum", shape.type_identifier)),

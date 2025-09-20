@@ -105,7 +105,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ];
 
     // Generate the complete schema file with a file ID
-    // let file_id = 0xabcd1234u64;
+    // this file ID was generated with `capnpc -i`
     let file_id = 0xfbb45a811fbe71f5;
     let schema = code_first_capnp::build_capnp_file(file_id, shapes)?;
     println!("{}", schema);
