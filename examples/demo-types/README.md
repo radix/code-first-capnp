@@ -8,12 +8,12 @@ This example demonstrates:
 
 - **Basic struct definitions** with various primitive types (`Person`, `Company`)
 - **Nested structs** (`Company` contains a list of `Person`)
-- **Simple enums** (`Status`) 
+- **Simple enums** (`Status`)
 - **Enums with data** (`EnumWithData`) showing different variant types
 - **Empty structs** (`EmptyStruct`)
-- **Backwards compatibility** (`UserProfileV2`) with deprecated/removed fields using `#[facet(capnp:extra)]`
-- **Custom field names** using `#[facet(capnp:name)]`
-- **Custom field IDs** using `#[facet(capnp:id)]`
+- **Backwards compatibility** (`UserProfileV2`) with deprecated/removed fields using `#[capnp(extra)]`
+- **Custom field names** using `#[capnp(name="customName")]`
+- **Custom field IDs** using `#[capnp(id=N)]`
 
 ## Running the example
 
@@ -27,7 +27,7 @@ This will output the generated Cap'n Proto schema to stdout.
 
 ## Structure
 
-- `src/lib.rs` - Contains all the type definitions with `#[derive(Facet)]` annotations
+- `src/lib.rs` - Contains all the type definitions with `#[derive(CapnpType)]` annotations
 - `src/main.rs` - Binary that generates and prints the schema
 - `Cargo.toml` - Depends on the main `code-first-capnp` crate via path dependency
 

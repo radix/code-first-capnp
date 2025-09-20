@@ -4,5 +4,5 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-facet.workspace = true
 heck.workspace = true
+code-first-capnp-macros.workspace = true

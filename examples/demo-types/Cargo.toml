@@ -3,6 +3,10 @@ name = "demo-types"
 version.workspace = true
 edition.workspace = true
 
+[[bin]]
+name = "demo-types"
+path = "src/main.rs"
+
 [dependencies]
 code-first-capnp = { path = "../../code-first-capnp" }
-facet.workspace = true
+code-first-capnp-macros.workspace = true
