@@ -94,27 +94,21 @@ struct UserProfileV2 {
 struct EmptyStruct;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("# Demo schema for code-first-capnp");
-    println!();
+    // Collect all the shapes we want to include in the schema
+    let shapes = &[
+        Company::SHAPE,
+        Person::SHAPE,
+        Status::SHAPE,
+        EnumWithData::SHAPE,
+        EmptyStruct::SHAPE,
+        UserProfileV2::SHAPE,
+    ];
 
-    let company_schema = code_first_capnp::capnp_schema_for::<Company>()?;
-    println!("{company_schema}");
-
-    let person_schema = code_first_capnp::capnp_schema_for::<Person>()?;
-    println!("{person_schema}");
-
-    let status_schema = code_first_capnp::capnp_schema_for::<Status>()?;
-    println!("{status_schema}");
-
-    let message_schema = code_first_capnp::capnp_schema_for::<EnumWithData>()?;
-    println!("{message_schema}");
-
-    let empty_schema = code_first_capnp::capnp_schema_for::<EmptyStruct>()?;
-    println!("{empty_schema}");
-
-    println!("# Backwards compatibility example with extra fields");
-    let profile_schema = code_first_capnp::capnp_schema_for::<UserProfileV2>()?;
-    println!("{profile_schema}");
+    // Generate the complete schema file with a file ID
+    // let file_id = 0xabcd1234u64;
+    let file_id = 0xfbb45a811fbe71f5;
+    let schema = code_first_capnp::build_capnp_file(file_id, shapes)?;
+    println!("{}", schema);
 
     Ok(())
 }

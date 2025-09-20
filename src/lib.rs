@@ -137,9 +137,44 @@ pub use capnp_model::{
     UnionVariantInner,
 };
 
+/// Builds a complete Cap'n Proto schema file with the given ID and shapes
+pub fn build_capnp_file(id: u64, shapes: &[&'static Shape]) -> Result<String, String> {
+    let mut output = String::new();
+
+    // Add file ID in hexadecimal at the top
+    output.push_str(&format!("@0x{:x};\n\n", id));
+
+    let mut document = Schema::new();
+
+    // Process each shape and add to document
+    for shape in shapes {
+        match shape.ty {
+            Type::User(UserType::Struct(_)) => {
+                let capnp_struct = build_capnp_struct_from_shape(shape)?;
+                document.add_item(SchemaItem::Struct(capnp_struct));
+            }
+            Type::User(UserType::Enum(_)) => {
+                let union_struct = build_capnp_union_from_shape(shape)?;
+                document.add_item(SchemaItem::Struct(union_struct));
+            }
+            _ => {
+                return Err(format!(
+                    "{} is not a supported type (must be struct or enum)",
+                    shape.type_identifier
+                ));
+            }
+        }
+    }
+
+    let schema_body = document.render().map_err(|e| e.to_string())?;
+    output.push_str(&schema_body);
+
+    Ok(output)
+}
+
 /// Generate a Cap'n Proto struct for a Rust struct
 pub fn capnp_struct_for<T: Facet<'static>>() -> Result<String, String> {
-    let capnp_struct = build_capnp_struct_from_shape::<T>()?;
+    let capnp_struct = build_capnp_struct_from_shape(T::SHAPE)?;
     let document = Schema::with_struct(capnp_struct);
     document.render().map_err(|e| e.to_string())
 }
@@ -148,13 +183,13 @@ pub fn capnp_struct_for<T: Facet<'static>>() -> Result<String, String> {
 /// For structs, produces the struct definition.
 /// For enums, produces both the union struct and all variant helper structs.
 pub fn capnp_schema_for<T: Facet<'static>>() -> Result<String, String> {
-    let document = build_capnp_document_from_shape::<T>()?;
+    let document = build_capnp_document_from_shape(T::SHAPE)?;
     document.render().map_err(|e| e.to_string())
 }
 
 /// Generate a Cap'n Proto union for a Rust enum
 pub fn capnp_union_for<T: Facet<'static>>() -> Result<String, String> {
-    let capnp_struct = build_capnp_union_from_shape::<T>()?;
+    let capnp_struct = build_capnp_union_from_shape(T::SHAPE)?;
     let document = Schema::with_struct(capnp_struct);
     document.render().map_err(|e| e.to_string())
 }
@@ -324,8 +359,7 @@ fn shape_to_capnp_type(shape: &'static Shape) -> Result<CapnpType, String> {
 }
 
 /// Builds a CapnpStruct from a facet struct shape
-pub fn build_capnp_struct_from_shape<T: Facet<'static>>() -> Result<Struct, String> {
-    let shape = T::SHAPE;
+pub fn build_capnp_struct_from_shape(shape: &'static Shape) -> Result<Struct, String> {
 
     let (st_name, st) = match shape.ty {
         Type::User(UserType::Struct(sd)) => (shape.type_identifier, sd),
@@ -373,8 +407,7 @@ pub fn build_capnp_struct_from_shape<T: Facet<'static>>() -> Result<Struct, Stri
 }
 
 /// Builds a CapnpStruct with union from a facet enum shape
-pub fn build_capnp_union_from_shape<T: Facet<'static>>() -> Result<Struct, String> {
-    let shape = T::SHAPE;
+pub fn build_capnp_union_from_shape(shape: &'static Shape) -> Result<Struct, String> {
 
     let (enum_name, enum_def) = match shape.ty {
         Type::User(UserType::Enum(ed)) => (shape.type_identifier, ed),
@@ -500,19 +533,18 @@ pub fn build_capnp_union_from_shape<T: Facet<'static>>() -> Result<Struct, Strin
 }
 
 /// Builds a complete CapnpDocument for any supported type
-pub fn build_capnp_document_from_shape<T: Facet<'static>>() -> Result<Schema, String> {
-    let shape = T::SHAPE;
+pub fn build_capnp_document_from_shape(shape: &'static Shape) -> Result<Schema, String> {
     let mut document = Schema::new();
 
     match shape.ty {
         Type::User(UserType::Struct(_)) => {
             // For structs, just generate the struct definition
-            let capnp_struct = build_capnp_struct_from_shape::<T>()?;
+            let capnp_struct = build_capnp_struct_from_shape(shape)?;
             document.add_item(SchemaItem::Struct(capnp_struct));
         }
         Type::User(UserType::Enum(_)) => {
             // For enums, generate only the union struct with groups
-            let union_struct = build_capnp_union_from_shape::<T>()?;
+            let union_struct = build_capnp_union_from_shape(shape)?;
             document.add_item(SchemaItem::Struct(union_struct));
         }
         _ => {
@@ -545,7 +577,7 @@ mod tests {
 
     #[test]
     fn test_basic_struct_model() {
-        let capnp_struct = build_capnp_struct_from_shape::<TestStruct>().unwrap();
+        let capnp_struct = build_capnp_struct_from_shape(TestStruct::SHAPE).unwrap();
 
         let expected = Struct {
             name: "TestStruct".to_string(),
@@ -583,7 +615,7 @@ mod tests {
 
     #[test]
     fn test_unit_struct_model() {
-        let capnp_struct = build_capnp_struct_from_shape::<EmptyStruct>().unwrap();
+        let capnp_struct = build_capnp_struct_from_shape(EmptyStruct::SHAPE).unwrap();
 
         let expected = Struct {
             name: "EmptyStruct".to_string(),
@@ -605,7 +637,7 @@ mod tests {
 
     #[test]
     fn test_missing_id_error() {
-        let result = build_capnp_struct_from_shape::<MissingIdStruct>();
+        let result = build_capnp_struct_from_shape(MissingIdStruct::SHAPE);
         assert!(result.is_err());
         let error_msg = result.unwrap_err();
         assert_eq!(
@@ -643,7 +675,7 @@ mod tests {
 
     #[test]
     fn test_simple_enum_union_model() {
-        let capnp_union = build_capnp_union_from_shape::<Status>().unwrap();
+        let capnp_union = build_capnp_union_from_shape(Status::SHAPE).unwrap();
 
         let expected = Struct {
             name: "Status".to_string(),
@@ -681,7 +713,7 @@ mod tests {
 
     #[test]
     fn test_complex_enum_union_model() {
-        let union_struct = build_capnp_union_from_shape::<ComplexEnum>().unwrap();
+        let union_struct = build_capnp_union_from_shape(ComplexEnum::SHAPE).unwrap();
 
         let expected = Struct {
             name: "ComplexEnum".to_string(),
@@ -745,7 +777,7 @@ mod tests {
 
     #[test]
     fn test_missing_variant_id_error() {
-        let result = build_capnp_union_from_shape::<MissingIdEnum>();
+        let result = build_capnp_union_from_shape(MissingIdEnum::SHAPE);
         assert!(result.is_err());
         let error_msg = result.unwrap_err();
         assert_eq!(
@@ -756,7 +788,7 @@ mod tests {
 
     #[test]
     fn test_unified_struct_document_model() {
-        let document = build_capnp_document_from_shape::<TestStruct>().unwrap();
+        let document = build_capnp_document_from_shape(TestStruct::SHAPE).unwrap();
 
         let expected = Schema {
             items: vec![SchemaItem::Struct(Struct {
@@ -793,7 +825,7 @@ mod tests {
 
     #[test]
     fn test_unified_complex_enum_document_model() {
-        let document = build_capnp_document_from_shape::<ComplexEnum>().unwrap();
+        let document = build_capnp_document_from_shape(ComplexEnum::SHAPE).unwrap();
         let expected = Schema {
             items: vec![SchemaItem::Struct(Struct {
                 name: "ComplexEnum".to_string(),
@@ -847,7 +879,7 @@ mod tests {
 
     #[test]
     fn test_unified_simple_enum_document_model() {
-        let schema = build_capnp_document_from_shape::<Status>().unwrap();
+        let schema = build_capnp_document_from_shape(Status::SHAPE).unwrap();
         let expected = Schema {
             items: vec![SchemaItem::Struct(Struct {
                 name: "Status".to_string(),
@@ -886,7 +918,7 @@ mod tests {
     #[test]
     fn test_field_sorting() {
         // Test that fields are sorted by ID
-        let capnp_struct = build_capnp_struct_from_shape::<TestStruct>().unwrap();
+        let capnp_struct = build_capnp_struct_from_shape(TestStruct::SHAPE).unwrap();
 
         let field_ids: Vec<u32> = capnp_struct.fields.iter().map(|f| f.id).collect();
         let expected_ids = vec![0, 1, 2, 3];
@@ -896,7 +928,7 @@ mod tests {
 
     #[test]
     fn test_type_mapping_coverage() {
-        let capnp_struct = build_capnp_struct_from_shape::<TestStruct>().unwrap();
+        let capnp_struct = build_capnp_struct_from_shape(TestStruct::SHAPE).unwrap();
 
         // Test various type mappings are covered
         let field_types: Vec<CapnpType> = capnp_struct
@@ -932,7 +964,7 @@ mod tests {
 
     #[test]
     fn test_enum_with_explicit_field_ids() {
-        let union_struct = build_capnp_union_from_shape::<EnumWithData>().unwrap();
+        let union_struct = build_capnp_union_from_shape(EnumWithData::SHAPE).unwrap();
         let expected = Struct {
             name: "EnumWithData".to_string(),
             fields: vec![],
@@ -994,7 +1026,7 @@ mod tests {
 
     #[test]
     fn test_struct_with_extra_fields() {
-        let capnp_struct = build_capnp_struct_from_shape::<StructWithExtraFields>().unwrap();
+        let capnp_struct = build_capnp_struct_from_shape(StructWithExtraFields::SHAPE).unwrap();
 
         let expected = Struct {
             name: "StructWithExtraFields".to_string(),
@@ -1025,7 +1057,7 @@ mod tests {
 
     #[test]
     fn test_enum_with_extra_fields() {
-        let union_struct = build_capnp_union_from_shape::<EnumWithExtraFields>().unwrap();
+        let union_struct = build_capnp_union_from_shape(EnumWithExtraFields::SHAPE).unwrap();
 
         let expected = Struct {
             name: "EnumWithExtraFields".to_string(),
@@ -1111,5 +1143,37 @@ mod tests {
         assert!(schema.contains("format @2 :Text;"));
         assert!(schema.contains("oldVariant @8 :Void;"));
         assert!(schema.contains("deprecatedData @9 :UInt32;"));
+    }
+
+    #[test]
+    fn test_build_capnp_file() {
+        let shapes = &[TestStruct::SHAPE, Status::SHAPE];
+        let file_id = 0xabcd1234u64;
+
+        let result = build_capnp_file(file_id, shapes).unwrap();
+
+        // Check that the file starts with the correct ID in hex
+        assert!(result.starts_with("@0xabcd1234;"));
+
+        // Check that both structs are present
+        assert!(result.contains("struct TestStruct {"));
+        assert!(result.contains("struct Status {"));
+
+        // Check specific field content
+        assert!(result.contains("fullName @1 :Text;"));
+        assert!(result.contains("active @0 :Void;"));
+
+        println!("Generated file:\n{}", result);
+    }
+
+    #[test]
+    fn test_build_capnp_file_empty_shapes() {
+        let shapes: &[&'static Shape] = &[];
+        let file_id = 0x42u64;
+
+        let result = build_capnp_file(file_id, shapes).unwrap();
+
+        // Should just contain the file ID
+        assert_eq!(result, "@0x42;\n\n");
     }
 }
