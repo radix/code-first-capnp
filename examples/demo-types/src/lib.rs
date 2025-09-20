@@ -1,7 +1,7 @@
 use facet::Facet;
 
 #[derive(Facet)]
-struct Person {
+pub struct Person {
     #[facet(capnp:id=0)]
     id: u64,
 
@@ -28,7 +28,7 @@ struct Person {
 }
 
 #[derive(Facet)]
-struct Company {
+pub struct Company {
     #[facet(capnp:id=0,name=companyName)]
     name: String,
 
@@ -45,7 +45,7 @@ struct Company {
 #[allow(dead_code)]
 #[derive(Facet)]
 #[repr(u8)]
-enum Status {
+pub enum Status {
     #[facet(capnp:id=0)]
     Active,
     #[facet(capnp:id=1)]
@@ -59,7 +59,7 @@ enum Status {
 #[allow(dead_code)]
 #[derive(Facet)]
 #[repr(u8)]
-enum EnumWithData {
+pub enum EnumWithData {
     MyText(#[facet(capnp:id=0)] String),
     Image {
         #[facet(capnp:id=1)]
@@ -76,7 +76,7 @@ enum EnumWithData {
 #[facet(capnp:extra="oldUserId @1 :UInt64")]
 #[facet(capnp:extra="deprecatedTimestamp @3 :UInt64")]
 #[facet(capnp:extra="removedMetadata @6 :Text")]
-struct UserProfileV2 {
+pub struct UserProfileV2 {
     #[facet(capnp:id=0)]
     username: String,
 
@@ -91,9 +91,10 @@ struct UserProfileV2 {
 }
 
 #[derive(Facet)]
-struct EmptyStruct;
+pub struct EmptyStruct;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// Generate the Cap'n Proto schema for all the demo types
+pub fn generate_schema() -> Result<String, Box<dyn std::error::Error>> {
     // Collect all the shapes we want to include in the schema
     let shapes = &[
         Company::SHAPE,
@@ -108,7 +109,5 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // this file ID was generated with `capnpc -i`
     let file_id = 0xfbb45a811fbe71f5;
     let schema = code_first_capnp::build_capnp_file(file_id, shapes)?;
-    println!("{}", schema);
-
-    Ok(())
+    Ok(schema)
 }

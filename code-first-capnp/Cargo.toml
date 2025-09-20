@@ -1,0 +1,8 @@
+[package]
+name = "code-first-capnp"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+facet.workspace = true
+heck.workspace = true

@@ -1,0 +1,8 @@
+[package]
+name = "demo-types"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+code-first-capnp = { path = "../../code-first-capnp" }
+facet.workspace = true

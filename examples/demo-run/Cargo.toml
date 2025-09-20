@@ -1,0 +1,12 @@
+[package]
+name = "demo-run"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+demo-types = { path = "../demo-types" }
+capnp.workspace = true
+
+[build-dependencies]
+demo-types = { path = "../demo-types" }
+capnpc.workspace = true
